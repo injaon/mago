@@ -34,7 +34,7 @@ class UserAccount(Model):
 import mago
 from mago.connection import Connection
 from mago.cursor import Cursor
-from mago.field import Field, EmptyRequiredField
+from mago.field import Field
 from mago.decorators import notinstancemethod
 
 # PyMongo change -- eventually this can go away,
@@ -78,12 +78,11 @@ class NewModelClass(type):
     """ Metaclass for inheriting field lists """
 
     def __new__(cls, name, bases, attributes):
-        # Emptying fields by default
-        attributes["__fields"] = {}
         new_model = super(NewModelClass, cls).__new__(
             cls, name, bases, attributes)
         # pre-populate fields
         new_model._update_fields()
+
         if hasattr(new_model, "_child_models"):
             # Resetting any model register for PolyModels -- better way?
             new_model._child_models = {}
@@ -92,6 +91,8 @@ class NewModelClass(type):
     def __setattr__(cls, name, value):
         """ Catching new field additions to classes """
         super(NewModelClass, cls).__setattr__(name, value)
+        # print("dafuq you did? estamos en metaclase")
+
         if isinstance(value, Field):
             # Update the fields, because they have changed
             cls._update_fields()
@@ -116,141 +117,78 @@ class Model(dict, metaclass=NewModelClass):
     _name = None
     _collection = None
     _init_okay = False
-    __fields = None
-
+    __fields = None # TODO: Chango to { (name => Field)}
 
     @property
     def _fields(self):
         """ Property wrapper for class fields """
         return self.__class__.__fields
 
-    # This is designed so that the end user can still use 'id' as a Field
-    # if desired. All internal use should use model._get_id()
     @property
     def id(self):
-        """
-        Returns the id. This is designed so that a subclass can still
-        overwrite 'id' if desired... internal use should only use
-        self._get_id(). May remove in the future if it's more annoying
-        than helpful.
-        """
-        return self._get_id()
+        return self.get(self._id_field)
 
     def __init__(self, **kwargs):
-        """ Creates an instance of the model, without saving it. """
+        """Creates an instance of the model, without saving it."""
         super(Model, self).__init__()
-        is_new_instance = self._id_field not in kwargs
+        for name, field in self._fields.items():
+            if field.default is not NotImplemented:
+                self[name] = field.default
 
         for field, value in kwargs.items():
-            if is_new_instance:
-                if field in list(self._fields.values()):
-                    # Running validation, if the field exists
-                    setattr(self, field, value)
-                else:
-                    if not mago.AUTO_CREATE_FIELDS:
-                        raise UnknownField("Unknown field %s" % field)
-                    self.add_field(field, Field())
-                    setattr(self, field, value)
-            else:
-                self[field] = value
-
-        for field_name in list(self._fields.values()):
-            attr = getattr(self.__class__, field_name)
-            self._fields[attr.id] = field_name
-
-            # set the default
-            attr._set_default(self, field_name)
-
-    def _get_id(self):
-        """
-        This is the internal id retrieval.
-        The .id property is the public method for getting
-        an id, but we use this so the user can overwrite
-        'id' if desired.
-        """
-        return self.get(self._id_field)
+            self[field] = value
 
     def save(self, *args, **kwargs):
         """ Passthru to PyMongo's save after checking values """
+        self._check_attrs()
         coll = self._get_collection()
-        self._check_required()
-        new_object_id = coll.save(self.copy(), *args, **kwargs)
-        if not self._get_id():
-            super(Model, self).__setitem__(self._id_field, new_object_id)
-        return new_object_id
+        _id = coll.save(self.copy(), *args, **kwargs)
 
+        if not self.id:
+            self[Model._id_field] = _id
+            # super(Model, self).__setitem__(Model._id_field, new_object_id)
+        return _id
 
-    def _instance_update(self, **kwargs):
-        """ Wraps keyword arguments with setattr and then uses PyMongo's
-        update call.
-         """
-        object_id = self._get_id()
-        if not object_id:
-            raise InvalidUpdateCall("Cannot call update on an unsaved model")
-        spec = {self._id_field: object_id}
-        # Currently the only argument we "pass on" is "safe"
-        pass_kwargs = {}
-        if "safe" in kwargs:
-            pass_kwargs["safe"] = kwargs.pop("safe")
-        body = {}
-        checks = []
-        for key, value in kwargs.items():
-            if key in list(self._fields.values()):
-                setattr(self, key, value)
-            else:
-                logging.warning("No field for %s" % key)
-                self[key] = value
-            # Attribute names to check.
-            checks.append(key)
-            # Field names in collection.
-            field = getattr(self.__class__, key)
-            field_name = field._get_field_name(self)
-            # setting the body key to the pymongo value
-            body[field_name] = self[field_name]
-        logging.debug("Checking fields (%s).", checks)
-        self._check_required(*checks)
+    def sync(self, **kwargs):
+        """Update all the fields to the db"""
+        for attr, value in kwargs.items():
+            self[attr] = value
+
+        self._check_attrs()
         coll = self._get_collection()
-        logging.debug("Setting body (%s)", body)
-        return coll.update(spec, {"$set": body}, **pass_kwargs)
+        doc = self.copy()
+        del doc[self._id_field]
 
-    update = BiContextual("update")
-
-    def _check_required(self, *field_names):
-        """ Ensures that all required fields are set. """
-        if not field_names:
-            field_names = list(self._fields.values())
-        for field_name in field_names:
-            # check that required attributes have been set before,
-            # or are currently being set
-            field = getattr(self.__class__, field_name)
-            storage_name = field._get_field_name(self)
-            if storage_name not in self:
-                if field.required:
-                    raise EmptyRequiredField(
-                        "'{}' is required but empty".format(field_name))
+        return coll.update({self._id_field: self.id},
+                           {"$set": doc})
 
     def get_ref(self):
         """ Returns a DBRef for an document. """
-        return DBRef(self._get_name(), self._get_id())
+        return DBRef(self._get_name(), self.id)
 
-    def delete(self, *args, **kwargs):
-        """
-        Uses the id in the collection.remove method.
-        Allows all the same arguments (except the spec/id).
-        """
-        if not self._get_id():
-            raise ValueError('No id has been set, so removal is impossible.')
-        coll = self._get_collection()
-        return coll.remove(self._get_id(), *args, **kwargs)
+    def delete(self):
+        """Uses the id in the collection.remove method.
+        Allows all the same arguments (except the spec/id)."""
+        if not self.id:
+            raise ValueError('Cannot delete an unsaved model.')
+        return self._get_collection().remove(self.id)
+
+    def _check_attrs(self, *field_names):
+        """Ensures that all fields are set correctly."""
+        if not field_names:
+            field_names = self._fields.keys()
+
+        declared_fields = self._fields.keys()
+        for field_name in field_names:
+            if field_name not in declared_fields:
+                continue
+
+            # field = getattr(self.__class__, field_name, NotImplemented)
+            field = self._fields[field_name]
+            value = self.get(field_name, NotImplemented)
+            field.check(value)
 
     ## class methods
-    # DEPRECATED
-    @classmethod
-    def new(cls, **kwargs):
-        """ Overwrite in each model for custom instantiaion logic """
-        instance = cls(**kwargs)
-        return instance
-
     @classmethod
     def use(cls, session):
         """ Wraps the class to use a specific connection session """
@@ -265,10 +203,7 @@ class Model(dict, metaclass=NewModelClass):
     @classmethod
     def create(cls, **kwargs):
         """ Create a new model and save it. """
-        if hasattr(cls, "new"):
-            model = cls.new(**kwargs)
-        else:
-            model = cls(**kwargs)
+        model = cls(**kwargs)
         model.save()
         return model
 
@@ -280,22 +215,20 @@ class Model(dict, metaclass=NewModelClass):
             attr = getattr(cls, attr_key)
             if not isinstance(attr, Field):
                 continue
-            cls.__fields[attr.id] = attr_key
+
+            cls.__fields[attr_key] = attr
+            attr.field_name = attr_key
 
     @classmethod
     def add_field(cls, field_name, new_field_descriptor):
         """ Adds a new field to the class """
         assert(isinstance(new_field_descriptor, Field))
         setattr(cls, field_name, new_field_descriptor)
-        cls._update_fields()
+        cls._update_fields()              # TODO: rm
 
-    # Using notinstancemethod for classmethods which would
-    # have dire, unintended consequences if used on an
-    # instance. (Like, wiping a collection by trying to "remove"
-    # a single document.)
     @notinstancemethod
     def remove(cls, *args, **kwargs):
-        """ Just a wrapper around the collection's remove. """
+        """Just a wrapper around the collection's remove."""
         if not args:
             # If you get this exception you are calling remove with no
             # arguments or with only keyword arguments, which is not
@@ -305,21 +238,16 @@ class Model(dict, metaclass=NewModelClass):
             # Model.remove({})
             raise ValueError(
                 'remove() requires a query when called with keyword arguments')
-        coll = cls._get_collection()
-        return coll.remove(*args, **kwargs)
+        return cls._get_collection().remove(*args, **kwargs)
 
     @notinstancemethod
     def drop(cls, *args, **kwargs):
         """ Just a wrapper around the collection's drop. """
-        coll = cls._get_collection()
-        return coll.drop(*args, **kwargs)
-
-    # for nod
-    _id = id
+        return cls._get_collection().drop(*args, **kwargs)
 
     @classmethod
-    def _class_update(cls, *args, **kwargs):
-        """ Direct passthru to PyMongo's update. """
+    def update(cls, *args, **kwargs):
+        """Direct passthru to PyMongo's update."""
         coll = cls._get_collection()
         # Maybe should do something 'clever' with the query?
         # E.g. transform Model instances to DBRefs automatically?
@@ -422,13 +350,6 @@ class Model(dict, metaclass=NewModelClass):
         return cls._get_collection().drop_indexes(*args, **kwargs)
 
     @classmethod
-    def distinct(cls, key):
-        """ Wrapper for collection distinct() """
-        return cls.find().distinct(key)
-
-    # Map Reduce and Group methods eventually go here.
-
-    @classmethod
     def _get_collection(cls):
         """ Connects and caches the collection connection object. """
         if not cls._collection:
@@ -440,33 +361,44 @@ class Model(dict, metaclass=NewModelClass):
     @classmethod
     def _get_name(cls):
         """
-        Retrieves the collection name.
-        Overwrite _name to set it manually.
+        Retrieves the collection name. Overwrite _name to set it manually.
         """
         if cls._name:
             return cls._name
         return cls.__name__.lower()
 
-    # Friendly wrappers around collection
-    @classmethod
-    def count(cls):
-        """ Just a wrapper for the collection.count() method. """
-        return cls.find().count()
-
     @notinstancemethod
     def make_ref(cls, idval):
-        """ Generates a DBRef for a given id. """
+        """Generates a DBRef for a given id."""
         if type(idval) != cls._id_type:
             # Casting to ObjectId (or str, or whatever is configured)
             idval = cls._id_type(idval)
         return DBRef(cls._get_name(), idval)
 
-    ## added!
+    # TODO: test how it works with the descriptors
     def __setattr__(self, name, value):
-        self[name] = value
+        print("model.__settattr__")
+        if name in self._fields.keys():
+            # llamar al field
+            self._fields[name].__set__(self, value)
+        else:
+            self[name] = value
+
+        # self._fields[name].__set__(self, value)   #
+        # super(Model, self).__setitem__(
+        #     name, self._fields[name].__set__(self, value))
+        # self[name] = value
+
+    # def __setitem__(self, key, value):
+    #     print("model.__setitem__")
+    #     # self.__setattr__(key, value)
+    #     self.__setattr__(key, value)
 
     def __getattr__(self, name):
-        return self[name]
+        return self.get(name, NotImplemented)
+
+    def __getitem__(self, key):
+        return self.get(key, NotImplemented)
 
     def __eq__(self, other):
         """
@@ -475,8 +407,8 @@ class Model(dict, metaclass=NewModelClass):
         """
         if not isinstance(other, Model):
             return False
-        this_id = self._get_id()
-        other_id = other._get_id()
+        this_id = self.id
+        other_id = other.id
         if self.__class__.__name__ == other.__class__.__name__ and \
                 this_id and other_id and this_id == other_id:
             return True
@@ -486,17 +418,13 @@ class Model(dict, metaclass=NewModelClass):
         """ Returns the inverse of __eq__ ."""
         return not self.__eq__(other)
 
-    def __unicode__(self):
-        """ Returns string representation. Overwrite in custom models. """
-        return "<MagoModel:%s id:%s>" % (self._get_name(), self._get_id())
-
     def __repr__(self):
-        """ Just points to __unicode__ """
-        return self.__unicode__()
+        """ Just points to __str__ """
+        return str(self)
 
     def __str__(self):
-        """ Just points to __unicode__ """
-        return self.__unicode__()
+        """str representation of the object"""
+        return "<MagoModel:{} id:{}>".format(self._get_name(), self.id)
 
 
 class PolyModel(Model):
