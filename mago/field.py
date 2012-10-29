@@ -43,24 +43,22 @@ class Field(object):
             return
 
     def __set__(self, obj, val):
-        print("Field.__set__")
         if self.value_type and not isinstance(val, self.value_type):
             raise FieldError("Invalid type: {} instead of {}".format(
                 type(val), self.value_type))
 
         if self._set_callback:
             val = self._set_callback(obj, val)
-        obj[self.field_name] = val
-
+        dict.__setitem__(obj, self.field_name, val)
 
     def __get__(self, obj, objtype):
+        # print("Field.__get__  con ", obj)
         if obj is None:
             # Classes see the descriptor itself
             return self
         if self._get_callback:
             return self._get_callback(obj, objtype)
         return obj.get(self.field_name, NotImplemented)
-        # return obj[self.field_name]
 
 class ReferenceField(Field):
     """ Simply holds information about the reference model. """

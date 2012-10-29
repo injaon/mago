@@ -375,30 +375,25 @@ class Model(dict, metaclass=NewModelClass):
             idval = cls._id_type(idval)
         return DBRef(cls._get_name(), idval)
 
-    # TODO: test how it works with the descriptors
     def __setattr__(self, name, value):
-        print("model.__settattr__")
         if name in self._fields.keys():
             # llamar al field
             self._fields[name].__set__(self, value)
         else:
-            self[name] = value
+            dict.__setitem__(self, name, value)
 
-        # self._fields[name].__set__(self, value)   #
-        # super(Model, self).__setitem__(
-        #     name, self._fields[name].__set__(self, value))
-        # self[name] = value
-
-    # def __setitem__(self, key, value):
-    #     print("model.__setitem__")
-    #     # self.__setattr__(key, value)
-    #     self.__setattr__(key, value)
+    def __setitem__(self, key, value):
+        self.__setattr__(key, value)
 
     def __getattr__(self, name):
+        # print("Model.__getattr__")
+        if name in self._fields.keys():
+            return self._fields[name].__get__(self, name)
         return self.get(name, NotImplemented)
 
     def __getitem__(self, key):
-        return self.get(key, NotImplemented)
+        # print("Model.__getitem__")        #
+        return self.__getattr__(key)
 
     def __eq__(self, other):
         """

@@ -8,6 +8,16 @@ class User(mago.Model):
 
 u = User()
 
+
+# u["user"] = "1"
+u["field"] = "1"
+# print(u.user)
+print(u["field"])
+
+
+sys.exit(0)
+
+
 print(u.user)
 u.user = "haaaa"
 print(u.user)
