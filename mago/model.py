@@ -1,65 +1,33 @@
-"""
-This is really the core of the library. It's just a dict subclass
-with a few wrapper methods. The idea is that you can access everything
-like normal in pymongo if you wanted to, with keys aplenty, or you can
-access values with attribute-style syntax.
-
-Most importantly however, you can add methods to the model which is
-sort of the main point of the MVC pattern of keeping logic with
-the appropriate construct.
-
-Specifying fields is optional, although it is recommended for
-external references.
-
-Usage example:
-
-from mago import Model
-import hashlib
-from datetime import datetime
-
-class UserAccount(Model):
-
-    name = Field(str)
-    email = Field(str)
-    company = ReferenceField(Company)
-    created_at = Field(datetime, datetime.now)
-
-    # Custom method example
-    def set_password(self, password):
-        self.password = hashlib.md5(password).hexdigest()
-        self.save()
-
-"""
+"""Core of the lib. It contains the class Model"""
 
 import mago
+import logging
+import pickle
 from mago.connection import Connection
 from mago.cursor import Cursor
 from mago.field import Field
 from mago.decorators import notinstancemethod
-
-# PyMongo change -- eventually this can go away,
-# and just be bson.dbref / bson.objectid
-try:
-    from pymongo.dbref import DBRef
-    from pymongo.objectid import ObjectId
-except ImportError:
-    from bson.dbref import DBRef
-    from bson.objectid import ObjectId
-
-import logging
+from mago.types import NATIVE_TYPES
+from bson.dbref import DBRef
+from bson.objectid import ObjectId
 
 
-class BiContextual(object):
-    """ Probably a terrible, terrible idea. """
+# class BiContextual(object):
+#     """ Probably a terrible, terrible idea. """
 
-    def __init__(self, name):
-        self.name = name
+#     def __init__(self, name):
+#         self.name = name
 
-    def __get__(self, obj, type=None):
-        """ Return a properly named method. """
-        if obj is None:
-            return getattr(type, "_class_" + self.name)
-        return getattr(obj, "_instance_" + self.name)
+#     def __get__(self, obj, type=None):
+#         """ Return a properly named method. """
+#         if obj is None:
+#             return getattr(type, "_class_" + self.name)
+#         return getattr(obj, "_instance_" + self.name)
+# TODO: add a property for coll in Model
+
+
+class UpdateError(Exception):
+    pass
 
 
 class InvalidUpdateCall(Exception):
@@ -67,11 +35,35 @@ class InvalidUpdateCall(Exception):
     pass
 
 
-class UnknownField(Exception):
-    """ Raised whenever an invalid field is accessed and the
-    AUTO_CREATE_FIELDS is False.
-    """
-    pass
+def obj_to_dict(obj):
+    # print(obj, type(obj))
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
+
+    res = {}
+    res["__class__"] = pickle.dumps(obj.__class__, 3)
+    for attr in obj.__dict__:
+        val = getattr(obj, attr)
+        if type(val) not in NATIVE_TYPES:
+            res[attr] = obj_to_dict(val)
+            res[attr]["__class__"] = pickle.dumps(val.__class__, 3)
+        else:
+            res[attr] = val
+
+    return res
+
+
+def dict_to_obj(dic):
+    class_ = dic.pop("__class__")
+    res = pickle.loads(class_)()
+
+    for attr, val in dic.items():
+        if val.__class__ is dict and val.get("__class__"):
+           val = dict_to_obj(val)
+        setattr(res, attr, val)
+
+    return res
+
 
 
 class NewModelClass(type):
@@ -99,18 +91,7 @@ class NewModelClass(type):
 
 
 class Model(dict, metaclass=NewModelClass):
-    """
-    Subclass this class to create your documents. Basic usage
-    is really simple:
-
-    class Foo(Model):
-        pass
-
-    foo = Foo(user='admin', password='cheese')
-    foo.save()
-    for result in Foo.find({'user':'admin'}):
-        print result.password
-    """
+    """"""
 
     _id_field = '_id'
     _id_type = ObjectId
@@ -126,13 +107,13 @@ class Model(dict, metaclass=NewModelClass):
 
     @property
     def id(self):
-        return self.get(self._id_field)
+        return self.get(self._id_field, mago.UnSet)
 
     def __init__(self, **kwargs):
         """Creates an instance of the model, without saving it."""
         super(Model, self).__init__()
         for name, field in self._fields.items():
-            if field.default is not NotImplemented:
+            if field.default is not mago.UnSet:
                 self[name] = field.default
 
         for field, value in kwargs.items():
@@ -140,10 +121,17 @@ class Model(dict, metaclass=NewModelClass):
 
     def save(self, *args, **kwargs):
         """ Passthru to PyMongo's save after checking values """
-        self._check_attrs()
-        coll = self._get_collection()
-        _id = coll.save(self.copy(), *args, **kwargs)
+        if self.id:
+            return
 
+        self._check_attrs()
+        store = self.copy()
+        for key, val in self.items():
+            if type(val) not in NATIVE_TYPES:
+                store[key] = obj_to_dict(val)
+
+        coll = self._get_collection()
+        _id = coll.save(store, *args, **kwargs)
         if not self.id:
             self[Model._id_field] = _id
             # super(Model, self).__setitem__(Model._id_field, new_object_id)
@@ -151,6 +139,10 @@ class Model(dict, metaclass=NewModelClass):
 
     def sync(self, **kwargs):
         """Update all the fields to the db"""
+        # TODO: do something usefull when self.id is None
+        if not self.id:
+            raise UpdateError("Cant sync an unsaved model.")
+
         for attr, value in kwargs.items():
             self[attr] = value
 
@@ -185,7 +177,7 @@ class Model(dict, metaclass=NewModelClass):
 
             # field = getattr(self.__class__, field_name, NotImplemented)
             field = self._fields[field_name]
-            value = self.get(field_name, NotImplemented)
+            value = self.get(field_name, mago.UnSet)
             field.check(value)
 
     ## class methods
@@ -202,7 +194,7 @@ class Model(dict, metaclass=NewModelClass):
 
     @classmethod
     def create(cls, **kwargs):
-        """ Create a new model and save it. """
+        """Create a new model and save it."""
         model = cls(**kwargs)
         model.save()
         return model
@@ -253,6 +245,7 @@ class Model(dict, metaclass=NewModelClass):
         # E.g. transform Model instances to DBRefs automatically?
         return coll.update(*args, **kwargs)
 
+    # search methods
     @classmethod
     def find_one(cls, *args, **kwargs):
         """
@@ -269,8 +262,7 @@ class Model(dict, metaclass=NewModelClass):
         coll = cls._get_collection()
         result = coll.find_one(*args, **kwargs)
         if result:
-            result = cls(**result)
-        return result
+            return cls(**result)
 
     @classmethod
     def find(cls, *args, **kwargs):
@@ -287,14 +279,6 @@ class Model(dict, metaclass=NewModelClass):
         return Cursor(cls, *args, **kwargs)
 
     @classmethod
-    def group(cls, *args, **kwargs):
-        """
-        A quick wrapper for the pymongo collection map / reduce grouping.
-        Will do more with this later.
-        """
-        return cls._get_collection().group(*args, **kwargs)
-
-    @classmethod
     def search(cls, **kwargs):
         """
         Helper method that wraps keywords to dict and automatically
@@ -307,8 +291,8 @@ class Model(dict, metaclass=NewModelClass):
             field = getattr(cls, key)
 
             # Try using custom field name in field.
-            if field._field_name:
-                key = field._field_name
+            if field.field_name:
+                key = field.field_name
 
             query[key] = value
         return cls.find(query)
@@ -324,8 +308,7 @@ class Model(dict, metaclass=NewModelClass):
     @classmethod
     def first(cls, **kwargs):
         """ Helper for returning Blah.search(foo=bar).first(). """
-        result = cls.search(**kwargs)
-        return result.first()
+        return cls.search(**kwargs).first()
 
     @classmethod
     def grab(cls, object_id):
@@ -333,6 +316,15 @@ class Model(dict, metaclass=NewModelClass):
         if type(object_id) != cls._id_type:
             object_id = cls._id_type(object_id)
         return cls.find_one({cls._id_field: object_id})
+    # }}}
+
+    @classmethod
+    def group(cls, *args, **kwargs):
+        """
+        A quick wrapper for the pymongo collection map / reduce grouping.
+        Will do more with this later.
+        """
+        return cls._get_collection().group(*args, **kwargs)
 
     @classmethod
     def create_index(cls, *args, **kwargs):
@@ -358,6 +350,7 @@ class Model(dict, metaclass=NewModelClass):
             cls._collection = coll
         return cls._collection
 
+    # TODO: change name
     @classmethod
     def _get_name(cls):
         """
@@ -375,9 +368,12 @@ class Model(dict, metaclass=NewModelClass):
             idval = cls._id_type(idval)
         return DBRef(cls._get_name(), idval)
 
+    # setters
     def __setattr__(self, name, value):
+        if value.__class__ is dict and value.get("__class__"):
+            value = dict_to_obj(value)
+
         if name in self._fields.keys():
-            # llamar al field
             self._fields[name].__set__(self, value)
         else:
             dict.__setitem__(self, name, value)
@@ -385,15 +381,23 @@ class Model(dict, metaclass=NewModelClass):
     def __setitem__(self, key, value):
         self.__setattr__(key, value)
 
+    #   getters
     def __getattr__(self, name):
         # print("Model.__getattr__")
         if name in self._fields.keys():
             return self._fields[name].__get__(self, name)
-        return self.get(name, NotImplemented)
+        return self.get(name, mago.UnSet)
 
     def __getitem__(self, key):
         # print("Model.__getitem__")        #
         return self.__getattr__(key)
+
+    # dellers
+    # def __delattr__(self, name):
+    #     pass
+
+    # def __delitem__(self, key):
+    #     pass
 
     def __eq__(self, other):
         """
@@ -422,61 +426,61 @@ class Model(dict, metaclass=NewModelClass):
         return "<MagoModel:{} id:{}>".format(self._get_name(), self.id)
 
 
-class PolyModel(Model):
-    """ A base class for inherited models """
+# class PolyModel(Model):
+#     """ A base class for inherited models """
 
-    _child_models = None
+#     _child_models = None
 
-    def __new__(cls, **kwargs):
-        """ Creates a model of the appropriate type """
-        # use the base model by default
-        create_class = cls
-        key_field = getattr(cls, cls.get_child_key(), None)
-        key = kwargs.get(cls.get_child_key())
-        if not key and key_field:
-            key = key_field.default
-        if key in cls._child_models:
-            create_class = cls._child_models[key]
-        return super(PolyModel, cls).__new__(create_class, **kwargs)
+#     def __new__(cls, **kwargs):
+#         """ Creates a model of the appropriate type """
+#         # use the base model by default
+#         create_class = cls
+#         key_field = getattr(cls, cls.get_child_key(), None)
+#         key = kwargs.get(cls.get_child_key())
+#         if not key and key_field:
+#             key = key_field.default
+#         if key in cls._child_models:
+#             create_class = cls._child_models[key]
+#         return super(PolyModel, cls).__new__(create_class, **kwargs)
 
-    @classmethod
-    def register(cls, name):
-        """ Decorator for registering a submodel """
-        def wrap(child_class):
-            """ Wrap the child class and return it """
-            # Better way to do this?
-            child_class._get_name = classmethod(lambda x: cls._get_name())
-            child_class._polyinfo = {
-                "parent": cls,
-                "name": name
-            }
-            cls._child_models[name] = child_class
-            return child_class
-        if not isinstance(name, str) and issubclass(name, cls):
-            # Decorator without arguments
-            child_cls = name
-            name = child_cls.__name__.lower()
-            return wrap(child_cls)
-        return wrap
+#     @classmethod
+#     def register(cls, name):
+#         """ Decorator for registering a submodel """
+#         def wrap(child_class):
+#             """ Wrap the child class and return it """
+#             # Better way to do this?
+#             child_class._get_name = classmethod(lambda x: cls._get_name())
+#             child_class._polyinfo = {
+#                 "parent": cls,
+#                 "name": name
+#             }
+#             cls._child_models[name] = child_class
+#             return child_class
+#         if not isinstance(name, str) and issubclass(name, cls):
+#             # Decorator without arguments
+#             child_cls = name
+#             name = child_cls.__name__.lower()
+#             return wrap(child_cls)
+#         return wrap
 
-    @classmethod
-    def _update_search_spec(cls, spec):
-        """ Update the search specification on child polymodels. """
-        if hasattr(cls, "_polyinfo"):
-            name = cls._polyinfo["name"]
-            polyclass = cls._polyinfo["parent"]
-            spec = spec or {}
-            spec.setdefault(polyclass.get_child_key(), name)
-        return spec
+#     @classmethod
+#     def _update_search_spec(cls, spec):
+#         """ Update the search specification on child polymodels. """
+#         if hasattr(cls, "_polyinfo"):
+#             name = cls._polyinfo["name"]
+#             polyclass = cls._polyinfo["parent"]
+#             spec = spec or {}
+#             spec.setdefault(polyclass.get_child_key(), name)
+#         return spec
 
-    @classmethod
-    def find(cls, spec=None, *args, **kwargs):
-        """ Add key to search params """
-        spec = cls._update_search_spec(spec)
-        return super(PolyModel, cls).find(spec, *args, **kwargs)
+#     @classmethod
+#     def find(cls, spec=None, *args, **kwargs):
+#         """ Add key to search params """
+#         spec = cls._update_search_spec(spec)
+#         return super(PolyModel, cls).find(spec, *args, **kwargs)
 
-    @classmethod
-    def find_one(cls, spec=None, *args, **kwargs):
-        """ Add key to search params for single result """
-        spec = cls._update_search_spec(spec)
-        return super(PolyModel, cls).find_one(spec, *args, **kwargs)
+#     @classmethod
+#     def find_one(cls, spec=None, *args, **kwargs):
+#         """ Add key to search params for single result """
+#         spec = cls._update_search_spec(spec)
+#         return super(PolyModel, cls).find_one(spec, *args, **kwargs)

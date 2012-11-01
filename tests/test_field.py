@@ -4,9 +4,9 @@ in mago Fields.
 """
 
 import unittest
-from mago import Field, ReferenceField, connect, Model, EnumField, ConstantField
-from mago.field import FieldError
-import mago
+from mago import Field, ReferenceField, connect, Model, EnumField
+from mago.field import ErrorField
+
 
 class Base(object):
     pass
@@ -29,88 +29,50 @@ class MagoFieldTests(unittest.TestCase):
 
     def test_field(self):
 
-        class MockModel(Model):
+        class MockModel(dict):
             field = Field(str)
             typeless = Field()
             required = Field(required=True)
-            default = Field(int, default=4)
             # reference = ReferenceField(Base)
 
         mock = MockModel()
-        for name, field in mock._fields.items():
-            self.assertEqual(name, field.field_name)
+        # checks if it is in the model fields (shouldn't be yet)
+        self.assertEqual(NotImplemented, mock.field)
+        self.assertEqual(NotImplemented, mock.other)
 
-        # checks the unassigned values
-        self.assertEqual(mago.UnSet, mock.field)
-        self.assertEqual(mago.UnSet, mock.other)
-        self.assertEqual(mago.UnSet, mock["other"])
-        self.assertEqual(mago.UnSet, mock["field"])
+        # # NOW we set up fields.
+        # cls_dict = MockModel.__dict__
+        # field_names = ["typeless", "required", "field", "string"]
+        # MockModel._fields = dict([(cls_dict[v].id, v) for v in field_names])
 
-        # check setters
-        mock.field = "testing"
-        mock["other"] = "schemaless"
-        mock1 = MockModel(field="on_init")
+        # self.assertEqual(mock.field, None)
 
-        # test getters
-        self.assertEqual("schemaless", mock["other"])
-        self.assertEqual("schemaless", mock.other)
-        self.assertEqual("testing", mock["field"])
-        self.assertEqual("testing", mock.field)
-        self.assertEqual("on_init", mock1.field)
-        self.assertEqual("on_init", mock1["field"])
+        # mock.field = "testing"
+        # self.assertEqual(mock.field, "testing")
+        # self.assertEqual(mock["field"], "testing")
+        # self.assertRaises(TypeError, setattr, mock, "field", 5)
+        # mock.required = "testing"
+        # self.assertEqual(mock["required"], "testing")
 
-        # test default
-        self.assertEqual(mock.default, 4)
-        self.assertEqual(mock["default"], 4)
+        # # Testing type-agnostic fields
+        # mock = MockModel()
+        # # shouldn't raise anything
+        # mock.typeless = 5
+        # mock.typeless = "string"
 
-        # test type constraint
-        self.assertRaises(FieldError, setattr, mock, "field", 5)
-        self.assertRaises(FieldError, mock.__setitem__, "field", 5)
-        self.assertRaises(FieldError, setattr, mock, "field", object())
-        self.assertRaises(FieldError, setattr, mock, "default", "object()")
-        self.assertRaises(FieldError, MockModel, **{"field" : 1})
+        # # Testing issubclass comparison for type checking
+        # # neither of these should raise a type error
+        # mock = MockModel(string="foobar")
+        # mock = MockModel(string=u"foobar")
 
-        # test typeless
-        mock.typeless = 5
-        mock.typeless = "string"
+        # base = Base()
+        # sub = Sub()
+        # mock = MockModel(reference=base)
+        # mock = MockModel(reference=sub)
 
-        # test required
-        # print(mock.copy())
-        self.assertRaises(FieldError, mock.save)
-
-    def test_enum_field(self):
-        """ Test the enum field """
-        class EnumModel(Model):
-            field = EnumField((1, 3, "what"))
-
-        mock = EnumModel()
-        mock.field = 3
-        self.assertEqual(mock.field, 3)
-        self.assertRaises(FieldError, setattr, mock, "field", 2)
-
-    def test_const_field(self):
-        class ConstField(Model):
-            field = ConstantField(str)
-
-        mock = ConstField()
-
-        self.assertEqual(mock.field, mago.UnSet)
-        mock.field = "testing"
-        self.assertEqual(mock.field, "testing")
-        mock.field = "keep testing"
-        self.assertEqual(mock.field, "keep testing")
-        mock.save()
-
-        self.assertEqual(mock.field, "keep testing")
-        self.assertRaises(FieldError, setattr, mock, "field", "I'm jumping!")
-        self.assertRaises(FieldError, delattr, mock, "field")
-
-        mock = ConstField.find_one({"field": "keep testing"})
-        self.assertEqual(mock.field, "keep testing")
-        self.assertRaises(FieldError, setattr, mock, "field", "jumping again!")
-        self.assertRaises(FieldError, delattr, mock, "field")
-
-
+        # empty_model = MockModel()
+        # # testing that the required field is, you know, required.
+        # self.assertRaises(EmptyRequiredField, getattr, empty_model, "required")
 
     # def test_change_field_name(self):
     #     """It should allow an override of a field's name."""
@@ -164,7 +126,21 @@ class MagoFieldTests(unittest.TestCase):
     #     fetched = MockModel.search(regular=u"meh.")
     #     self.assertEqual(1, fetched.count())
 
+    # def test_enum_field(self):
+    #     """ Test the enum field """
+    #     class EnumModel1(Model):
+    #         field = EnumField((1, 3, "what"))
 
+    #     instance = EnumModel1(field=3)
+    #     self.assertEqual(instance.field, 3)
+    #     with self.assertRaises(ValueError):
+    #         instance = EnumModel1(field=False)
+
+    #     class EnumModel2(Model):
+    #         field = EnumField(lambda x: x.__class__.__name__)
+    #     EnumModel2(field="EnumModel2")
+    #     with self.assertRaises(ValueError):
+    #         EnumModel1(field="nottheclassname")
 
     # def test_default_field(self):
     #     """ Test that the default behavior works like you'd expect. """
@@ -188,6 +164,3 @@ class MagoFieldTests(unittest.TestCase):
     #     entry3 = TestDefaultModel2(field="foobar")
     #     self.assertEqual("foobar", entry3.field)
     #     self.assertEqual("foobar", entry3["field"])
-
-if __name__ == "__main__":
-    unittest.main()

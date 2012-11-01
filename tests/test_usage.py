@@ -1,6 +1,6 @@
 """
 A variety of tests to cover the majority of the functionality
-in mogo. I'd really like to get this to 100% code coverage...
+in mago. I'd really like to get this to 100% code coverage...
 
 NOTES:
 I use safe=True for most of the save operations because sometimes
@@ -11,15 +11,15 @@ You need to have mongod running on the local machine for this
 to run. Will probably add config options later for testing
 remote machines.
 
-If for some reason you have a database named "_mogotest", you will
+If for some reason you have a database named "_magotest", you will
 probably want to change DBNAME. :)
 """
 
 import unittest
-import mogo
-from mogo import PolyModel, Model, Field, ReferenceField, DESC, connect
-from mogo import ConstantField
-from mogo.connection import Connection
+import mago
+from mago import PolyModel, Model, Field, ReferenceField, DESC, connect
+from mago import ConstantField
+from mago.connection import Connection
 import pymongo
 
 try:
@@ -30,26 +30,26 @@ except ImportError:
 import sys
 from datetime import datetime
 
-DBNAME = '_mogotest'
-ALTDB = "_mogotest2"
+DBNAME = '_magotest'
+ALTDB = "_magotest2"
 DELETE = True
 
 
 class Foo(Model):
-    bar = Field(unicode)
+    bar = Field(str)
     typeless = Field()
-    dflt = Field(unicode, default=u'dflt')
-    callme = Field(unicode, default=lambda: u'funtimes')
+    dflt = Field(str, default=u'dflt')
+    callme = Field(str, default=lambda: u'funtimes')
     dtnow = Field(datetime, default=lambda: datetime.now())
 
-    def __unicode__(self):
+    def __str__(self):
         return "FOOBAR"
 
 Foo.ref = ReferenceField(Foo)
 
 
 class FooWithNew(Model):
-    bar = Field(unicode)
+    bar = Field(str)
 
     @classmethod
     def new(cls):
@@ -80,7 +80,7 @@ class Car(PolyModel):
     """ Base model for alternate inheritance """
     doors = Field(int, default=4)
     wheels = Field(int, default=4)
-    type = Field(unicode, default=u"car")
+    type = Field(str, default=u"car")
 
     @classmethod
     def get_child_key(cls):
@@ -95,7 +95,7 @@ class Car(PolyModel):
 class SportsCar(Car):
     """ Alternate car """
     doors = Field(int, default=2)
-    type = Field(unicode, default=u"sportscar")
+    type = Field(str, default=u"sportscar")
 
     def drive(self):
         """ Overwritten """
@@ -108,7 +108,7 @@ class Convertible(SportsCar):
 
     _top_down = False
 
-    type = Field(unicode, default=u"convertible")
+    type = Field(str, default=u"convertible")
 
     def toggle_roof(self):
         """ Opens / closes roof """
@@ -116,7 +116,7 @@ class Convertible(SportsCar):
         return self._top_down
 
 
-class MogoTests(unittest.TestCase):
+class MagoTests(unittest.TestCase):
 
     def setUp(self):
         self._conn = connect(DBNAME)
@@ -289,7 +289,7 @@ class MogoTests(unittest.TestCase):
     def test_flexible_fields(self):
         """ Test that anything can be passed in """
         try:
-            mogo.AUTO_CREATE_FIELDS = True
+            mago.AUTO_CREATE_FIELDS = True
 
             class Flexible(Model):
                 pass
@@ -306,7 +306,7 @@ class MogoTests(unittest.TestCase):
             self.assertEqual(instance.foo, "bar")
             self.assertEqual(instance.age, 5)
         finally:
-            mogo.AUTO_CREATE_FIELDS = False
+            mago.AUTO_CREATE_FIELDS = False
 
     def test_class_update(self):
         class Mod(Model):
@@ -440,7 +440,7 @@ class MogoTests(unittest.TestCase):
         self.assertEqual(Person.find()[1]['another_field'], "foobar")
 
     def test_poly_model_inheritance(self):
-        """ Test the mogo support for model inheritance """
+        """ Test the mago support for model inheritance """
         self.assertEqual(Car._get_name(), SportsCar._get_name())
         self.assertEqual(Car._get_collection(), SportsCar._get_collection())
         car = Car()
@@ -488,19 +488,19 @@ class MogoTests(unittest.TestCase):
         self.assertEqual(Convertible.find_one(), convertible)
 
     def test_representation_methods(self):
-        """ Test __repr__, __str__, and __unicode__ """
+        """ Test __repr__, __str__, and __str__ """
         repr_result = Foo().__repr__()
         str_result = Foo().__str__()
-        unicode_result = Foo().__unicode__()
+        str_result = Foo().__str__()
         hypo = "FOOBAR"
-        self.assertTrue(repr_result == str_result == unicode_result == hypo)
+        self.assertTrue(repr_result == str_result == str_result == hypo)
 
     def test_session(self):
         """ Test using a session on a model """
         foo = Foo()
         foo.save(safe=True)
         self.assertEqual(Foo.find().count(), 1)
-        session = mogo.session(ALTDB)
+        session = mago.session(ALTDB)
         session.connect()
         FooWrapped = Foo.use(session)
         self.assertEqual(FooWrapped._get_name(), Foo._get_name())
@@ -514,7 +514,7 @@ class MogoTests(unittest.TestCase):
 
     def test_connection_with_statement(self):
         """ Test the with statement alternate connection """
-        with mogo.session(ALTDB) as s:
+        with mago.session(ALTDB) as s:
             foo = Foo.use(s)(bar=u"testing_with_statement")
             foo.save(safe=True)
             results = Foo.use(s).find({"bar": "testing_with_statement"})
@@ -527,7 +527,7 @@ class MogoTests(unittest.TestCase):
     def test_constant_field(self):
         """ Test the ConstantField """
         class ConstantModel(Model):
-            name = Field(unicode, required=True)
+            name = Field(str, required=True)
             constant = ConstantField(int, required=True)
 
         # this is fine

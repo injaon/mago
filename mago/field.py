@@ -3,7 +3,8 @@
 import warnings
 from collections import Callable
 from bson.dbref import DBRef
-
+import mago
+# from mago import UnSet
 
 class FieldError(Exception):
     pass
@@ -22,10 +23,11 @@ class Field(object):
             return self._default()
         return self._default
 
+    # TODO: warn about unused kwargs
     def __init__(self, value_type=None, **kwargs):
         self.value_type = value_type
         self.required = kwargs.get("required", False)
-        self._default = kwargs.get("default", NotImplemented)
+        self._default = kwargs.get("default", mago.UnSet)
         self.field_name = None
 
         set_cb = getattr(self, "_set_callback", None)
@@ -36,11 +38,9 @@ class Field(object):
 
     def check(self, value):
         """Checks all constraints"""
-        if self.required and value is NotImplemented:
+        if self.required and not value:
             raise FieldError("'{}' is required but empty.".format(
                 self.field_name))
-        if not self.required and value is NotImplemented:
-            return
 
     def __set__(self, obj, val):
         if self.value_type and not isinstance(val, self.value_type):
@@ -58,7 +58,9 @@ class Field(object):
             return self
         if self._get_callback:
             return self._get_callback(obj, objtype)
-        return obj.get(self.field_name, NotImplemented)
+        # return obj.get(self.field_name, NotImplemented)
+        return obj.get(self.field_name, mago.UnSet)
+
 
 class ReferenceField(Field):
     """ Simply holds information about the reference model. """
@@ -92,6 +94,10 @@ class ConstantField(Field):
         if obj.id and val is not obj[self.field_name]:
             raise FieldError("Constant fields cannot be altered after saving.")
         return val
+
+    def __delete__(self, obj):
+        if obj.id:
+            raise FieldError("Can not delete a constant field after saving.")
 
 
 class EnumField(Field):

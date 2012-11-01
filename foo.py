@@ -1,78 +1,32 @@
 import mago
-mago.connect("leviathan")
+mago.connect("foo")
 import sys
 
 class User(mago.Model):
     user = mago.Field(str)
 
 
-u = User()
+class B:
+    def __init__(self):
+        self.una = 1
 
+    def hola(self):
+        print(self.una)
 
-# u["user"] = "1"
-u["field"] = "1"
-# print(u.user)
-print(u["field"])
-
-
-sys.exit(0)
-
-
-print(u.user)
-u.user = "haaaa"
-print(u.user)
-# print(u["user"])
+ # u = User.find({"user": "hola"}).first()
+cur = User.find({"user": "hola"})
+for c in cur:
+    print(c.copy())
 
 
 
-# print(u["user"])
-# print(u["holaa"])
+# u.u.hola()
+# u = User.find_one()
+# mad = B()
+# mad.b = "as"
 
-print("copy >> ", u.copy())
+# u.user = "hola"
+# u.u = mad
+# u.save()
 
-# u.holaa = "hola"
-# print(u.holaa)
-
-# print("copy >> ", u.copy())
-
-
-# u["holaa"] = "holaaaaa"
-# print(u.holaa)
-# print("copy >> ", u.copy())
-
-
-sys.exit(0)
-
-
-# u.chau = "cahu"
-
-print(u.chau)
-print(u.copy())
-
-
-# print(User.find().count())
-sys.exit(0)
-
-
-User.drop()
-input("c....")
-User.create(hola="dd")
-
-sandb
-
-
-u = User()
-u.user = "viejo1"
-u.save()
-
-print(u.copy())
-input("c....")
-
-# u.user = 1
-u.update_sync(maaan="asdasd")
-print(u.copy())
-input("c....")
-
-u.delete()
-print(u.copy())
-
+# User.drop()

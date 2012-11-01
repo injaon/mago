@@ -21,7 +21,7 @@ class Cursor(PyCursor):
         PyCursor.__init__(self, model._get_collection(), *args, **kwargs)
 
     def __next__(self):
-        value = PyCursor.next(self)
+        value = PyCursor.__next__(self)
         return self._model(**value)
 
     def __getitem__(self, *args, **kwargs):
