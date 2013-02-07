@@ -1,5 +1,6 @@
 """Core of the lib. It contains the class Model"""
 
+
 import mago
 import logging
 import pickle
@@ -12,31 +13,7 @@ from bson.dbref import DBRef
 from bson.objectid import ObjectId
 
 
-# class BiContextual(object):
-#     """ Probably a terrible, terrible idea. """
-
-#     def __init__(self, name):
-#         self.name = name
-
-#     def __get__(self, obj, type=None):
-#         """ Return a properly named method. """
-#         if obj is None:
-#             return getattr(type, "_class_" + self.name)
-#         return getattr(obj, "_instance_" + self.name)
-# TODO: add a property for coll in Model
-
-
-class UpdateError(Exception):
-    pass
-
-
-class InvalidUpdateCall(Exception):
-    """ Raised whenever update is called on a new model """
-    pass
-
-
 def obj_to_dict(obj):
-    # print(obj, type(obj))
     if hasattr(obj, "to_dict"):
         return obj.to_dict()
 
@@ -49,7 +26,6 @@ def obj_to_dict(obj):
             res[attr]["__class__"] = pickle.dumps(val.__class__, 3)
         else:
             res[attr] = val
-
     return res
 
 
@@ -59,193 +35,36 @@ def dict_to_obj(dic):
 
     for attr, val in dic.items():
         if val.__class__ is dict and val.get("__class__"):
-           val = dict_to_obj(val)
+            val = dict_to_obj(val)
         setattr(res, attr, val)
-
     return res
-
 
 
 class NewModelClass(type):
     """ Metaclass for inheriting field lists """
-
     def __new__(cls, name, bases, attributes):
         new_model = super(NewModelClass, cls).__new__(
             cls, name, bases, attributes)
-        # pre-populate fields
-        new_model._update_fields()
 
-        if hasattr(new_model, "_child_models"):
-            # Resetting any model register for PolyModels -- better way?
-            new_model._child_models = {}
+        if new_model.__name__ == "Model":
+            return new_model
+        new_model._name = new_model.__name__.lower()
+
+        # pre-populate fields
+        new_model._fields = {}
+        for attr in dir(new_model):
+            value = getattr(new_model, attr)
+            if not isinstance(value, Field):
+                continue
+
+            new_model._fields[attr] = value
+            value.field_name = attr
         return new_model
 
-    def __setattr__(cls, name, value):
-        """ Catching new field additions to classes """
-        super(NewModelClass, cls).__setattr__(name, value)
-        # print("dafuq you did? estamos en metaclase")
 
-        if isinstance(value, Field):
-            # Update the fields, because they have changed
-            cls._update_fields()
-
-
-class Model(dict, metaclass=NewModelClass):
-    """"""
-
-    _id_field = '_id'
-    _id_type = ObjectId
-    _name = None
-    _collection = None
-    _init_okay = False
-    __fields = None # TODO: Chango to { (name => Field)}
-
-    @property
-    def _fields(self):
-        """ Property wrapper for class fields """
-        return self.__class__.__fields
-
-    @property
-    def id(self):
-        return self.get(self._id_field, mago.UnSet)
-
-    def __init__(self, **kwargs):
-        """Creates an instance of the model, without saving it."""
-        super(Model, self).__init__()
-        for name, field in self._fields.items():
-            if field.default is not mago.UnSet:
-                self[name] = field.default
-
-        for field, value in kwargs.items():
-            self[field] = value
-
-    def save(self, *args, **kwargs):
-        """ Passthru to PyMongo's save after checking values """
-        if self.id:
-            return
-
-        self._check_attrs()
-        store = self.copy()
-        for key, val in self.items():
-            if type(val) not in NATIVE_TYPES:
-                store[key] = obj_to_dict(val)
-
-        coll = self._get_collection()
-        _id = coll.save(store, *args, **kwargs)
-        if not self.id:
-            self[Model._id_field] = _id
-            # super(Model, self).__setitem__(Model._id_field, new_object_id)
-        return _id
-
-    def sync(self, **kwargs):
-        """Update all the fields to the db"""
-        # TODO: do something usefull when self.id is None
-        if not self.id:
-            raise UpdateError("Cant sync an unsaved model.")
-
-        for attr, value in kwargs.items():
-            self[attr] = value
-
-        self._check_attrs()
-        coll = self._get_collection()
-        doc = self.copy()
-        del doc[self._id_field]
-
-        return coll.update({self._id_field: self.id},
-                           {"$set": doc})
-
-    def get_ref(self):
-        """ Returns a DBRef for an document. """
-        return DBRef(self._get_name(), self.id)
-
-    def delete(self):
-        """Uses the id in the collection.remove method.
-        Allows all the same arguments (except the spec/id)."""
-        if not self.id:
-            raise ValueError('Cannot delete an unsaved model.')
-        return self._get_collection().remove(self.id)
-
-    def _check_attrs(self, *field_names):
-        """Ensures that all fields are set correctly."""
-        if not field_names:
-            field_names = self._fields.keys()
-
-        declared_fields = self._fields.keys()
-        for field_name in field_names:
-            if field_name not in declared_fields:
-                continue
-
-            # field = getattr(self.__class__, field_name, NotImplemented)
-            field = self._fields[field_name]
-            value = self.get(field_name, mago.UnSet)
-            field.check(value)
-
-    ## class methods
-    @classmethod
-    def use(cls, session):
-        """ Wraps the class to use a specific connection session """
-        class Wrapped(cls):
-            pass
-        Wrapped.__name__ = cls.__name__
-        connection = session.connection
-        collection = connection.get_collection(Wrapped._get_name())
-        Wrapped._collection = collection
-        return Wrapped
-
-    @classmethod
-    def create(cls, **kwargs):
-        """Create a new model and save it."""
-        model = cls(**kwargs)
-        model.save()
-        return model
-
-    @classmethod
-    def _update_fields(cls):
-        """ (Re)update the list of fields """
-        cls.__fields = {}
-        for attr_key in dir(cls):
-            attr = getattr(cls, attr_key)
-            if not isinstance(attr, Field):
-                continue
-
-            cls.__fields[attr_key] = attr
-            attr.field_name = attr_key
-
-    @classmethod
-    def add_field(cls, field_name, new_field_descriptor):
-        """ Adds a new field to the class """
-        assert(isinstance(new_field_descriptor, Field))
-        setattr(cls, field_name, new_field_descriptor)
-        cls._update_fields()              # TODO: rm
-
-    @notinstancemethod
-    def remove(cls, *args, **kwargs):
-        """Just a wrapper around the collection's remove."""
-        if not args:
-            # If you get this exception you are calling remove with no
-            # arguments or with only keyword arguments, which is not
-            # supported (and would remove all entries in the current
-            # collection if it was.) If you really want to delete
-            # everything in a collection, pass an empty dictionary like
-            # Model.remove({})
-            raise ValueError(
-                'remove() requires a query when called with keyword arguments')
-        return cls._get_collection().remove(*args, **kwargs)
-
-    @notinstancemethod
-    def drop(cls, *args, **kwargs):
-        """ Just a wrapper around the collection's drop. """
-        return cls._get_collection().drop(*args, **kwargs)
-
-    @classmethod
-    def update(cls, *args, **kwargs):
-        """Direct passthru to PyMongo's update."""
-        coll = cls._get_collection()
-        # Maybe should do something 'clever' with the query?
-        # E.g. transform Model instances to DBRefs automatically?
-        return coll.update(*args, **kwargs)
-
-    # search methods
+class Entity(object):
+    """It contains _only_ class methods related with the entity
+    and not the object."""
     @classmethod
     def find_one(cls, *args, **kwargs):
         """
@@ -259,17 +78,42 @@ class Model(dict, metaclass=NewModelClass):
             raise ValueError(
                 "find_one() requires a query when called with "
                 "keyword arguments")
-        coll = cls._get_collection()
+        coll = cls.collection()
         result = coll.find_one(*args, **kwargs)
         if result:
             return cls(**result)
 
+    @notinstancemethod
+    def remove(cls, *args, **kwargs):
+        """Just a wrapper around the collection's remove."""
+        if not args:
+            # If you get this exception you are calling remove with no
+            # arguments or with only keyword arguments, which is not
+            # supported (and would remove all entries in the current
+            # collection if it was.) If you really want to delete
+            # everything in a collection, pass an empty dictionary like
+            # Model.remove({})
+            raise ValueError(
+                'remove() requires a query when called with keyword arguments')
+        return cls.collection().remove(*args, **kwargs)
+
+    @notinstancemethod
+    def drop(cls, *args, **kwargs):
+        """ Just a wrapper around the collection's drop. """
+        return cls.collection().drop(*args, **kwargs)
+
+    @classmethod
+    def update(cls, *args, **kwargs):
+        """Direct passthru to PyMongo's update."""
+        coll = cls.collection()
+        # Maybe should do something 'clever' with the query?
+        # E.g. transform Model instances to DBRefs automatically?
+        return coll.update(*args, **kwargs)
+
     @classmethod
     def find(cls, *args, **kwargs):
-        """
-        A wrapper for the pymongo cursor. Uses all the
-        same arguments.
-        """
+        """A wrapper for the pymongo cursor. Uses all the
+        same arguments."""
         if kwargs and not args:
             # If you get this exception you should probably be calling search,
             # not find. If you really want to call find, pass an empty dict:
@@ -297,76 +141,103 @@ class Model(dict, metaclass=NewModelClass):
             query[key] = value
         return cls.find(query)
 
-    @classmethod
-    def search_or_create(cls, **kwargs):
-        "search for an instance that matches kwargs or make one with __init__"
-        obj = cls.search(**kwargs).first()
-        if obj:
-            return obj
-        return cls.create(**kwargs)
+
+class Model(dict, Entity, metaclass=NewModelClass):
+    """Core class of the module. It is disigned to be inherited."""
+
+    _name = None
+    _collection = None
+    _fields = None
+
+    @property
+    def fields(self):
+        """ Property wrapper for class fields """
+        return self.__class__._fields
+
+    @property
+    def id(self):
+        return self.get('_id', mago.UnSet)
 
     @classmethod
-    def first(cls, **kwargs):
-        """ Helper for returning Blah.search(foo=bar).first(). """
-        return cls.search(**kwargs).first()
+    def collection_name(cls):
+        return cls._name
 
     @classmethod
-    def grab(cls, object_id):
-        """ A shortcut to retrieve one object by its id. """
-        if type(object_id) != cls._id_type:
-            object_id = cls._id_type(object_id)
-        return cls.find_one({cls._id_field: object_id})
-    # }}}
-
-    @classmethod
-    def group(cls, *args, **kwargs):
-        """
-        A quick wrapper for the pymongo collection map / reduce grouping.
-        Will do more with this later.
-        """
-        return cls._get_collection().group(*args, **kwargs)
-
-    @classmethod
-    def create_index(cls, *args, **kwargs):
-        """ Wrapper for collection create_index() """
-        return cls._get_collection().create_index(*args, **kwargs)
-
-    @classmethod
-    def ensure_index(cls, *args, **kwargs):
-        """ Wrapper for collection ensure_index() """
-        return cls._get_collection().ensure_index(*args, **kwargs)
-
-    @classmethod
-    def drop_indexes(cls, *args, **kwargs):
-        """ Wrapper for collection drop_indexes() """
-        return cls._get_collection().drop_indexes(*args, **kwargs)
-
-    @classmethod
-    def _get_collection(cls):
-        """ Connects and caches the collection connection object. """
+    def collection(cls):
         if not cls._collection:
-            conn = Connection.instance()
-            coll = conn.get_collection(cls._get_name())
-            cls._collection = coll
+            cls._collection = Connection.instance().get_collection(
+                cls._name)
         return cls._collection
 
-    # TODO: change name
-    @classmethod
-    def _get_name(cls):
-        """
-        Retrieves the collection name. Overwrite _name to set it manually.
-        """
-        if cls._name:
-            return cls._name
-        return cls.__name__.lower()
+    def __init__(self, **kwargs):
+        """Creates an instance of the model, without saving it."""
+        super(Model, self).__init__()
+        Entity.__init__(self)
+        if self.__class__ is Model:
+            raise TypeError("Cannot instance Model.")
 
-    @notinstancemethod
-    def make_ref(cls, idval):
-        """Generates a DBRef for a given id."""
-        if type(idval) != cls._id_type:
-            # Casting to ObjectId (or str, or whatever is configured)
-            idval = cls._id_type(idval)
-        return DBRef(cls._get_name(), idval)
+        Entity.__setattr__(self, 'session', None)
+
+        for name, field in self._fields.items():
+            if field.default is not mago.UnSet:
+                self[name] = field.default
+
+        for field, value in kwargs.items():
+            self[field] = value
+
+    def save(self, *args, **kwargs):
+        """Saves or updates the model in the database"""
+        if self.id:
+            return self.sync()
+        self._check_attrs()
+        store = self.copy()
+        for key, val in self.items():
+            if type(val) not in NATIVE_TYPES:
+                store[key] = obj_to_dict(val)
+
+        coll = self.collection()
+        dict.__setitem__(self, '_id', coll.save(store, *args, **kwargs))
+        return self
+
+    def sync(self):
+        """Update all the fields to the db"""
+        if not self.id:
+            raise ValueError("Cant sync an unsaved model.")
+
+        self._check_attrs()
+        coll = self.collection()
+        doc = self.copy()
+        del doc[self._id]
+
+        # TODO: why??
+        return coll.update({self._id: self.id},
+                           {"$set": doc})
+
+    def delete(self):
+        """Uses the id in the collection.remove method.
+        Allows all the same arguments (except the spec/id)."""
+        if not self.id:
+            raise ValueError('Cannot delete an unsaved model.')
+        return self.collection().remove(self.id)
+
+    def get_ref(self):
+        """ Returns a DBRef for an document. """
+        return DBRef(self.collection_name(), self.id)
+
+    def _check_attrs(self, *field_names):
+        """Ensures that all fields are set correctly."""
+        if not field_names:
+            field_names = self._fields.keys()
+
+        declared_fields = self._fields.keys()
+        for field_name in field_names:
+            if field_name not in declared_fields:
+                continue
+
+            # field = getattr(self.__class__, field_name, NotImplemented)
+            field = self._fields[field_name]
+            value = self.get(field_name, mago.UnSet)
+            field.check(value)
 
     # setters
     def __setattr__(self, name, value):
@@ -378,19 +249,22 @@ class Model(dict, metaclass=NewModelClass):
         else:
             dict.__setitem__(self, name, value)
 
+        if Entity.__getattribute__(self, 'session'):
+            Entity.__getattribute__(self, 'session')._register_dirty(self)
+
     def __setitem__(self, key, value):
         self.__setattr__(key, value)
 
-    #   getters
+    # getters
     def __getattr__(self, name):
-        # print("Model.__getattr__")
         if name in self._fields.keys():
             return self._fields[name].__get__(self, name)
         return self.get(name, mago.UnSet)
 
     def __getitem__(self, key):
-        # print("Model.__getitem__")        #
         return self.__getattr__(key)
+
+    # TODO: when remove a values it changes to dirty
 
     # dellers
     # def __delattr__(self, name):
@@ -423,64 +297,4 @@ class Model(dict, metaclass=NewModelClass):
 
     def __str__(self):
         """str representation of the object"""
-        return "<MagoModel:{} id:{}>".format(self._get_name(), self.id)
-
-
-# class PolyModel(Model):
-#     """ A base class for inherited models """
-
-#     _child_models = None
-
-#     def __new__(cls, **kwargs):
-#         """ Creates a model of the appropriate type """
-#         # use the base model by default
-#         create_class = cls
-#         key_field = getattr(cls, cls.get_child_key(), None)
-#         key = kwargs.get(cls.get_child_key())
-#         if not key and key_field:
-#             key = key_field.default
-#         if key in cls._child_models:
-#             create_class = cls._child_models[key]
-#         return super(PolyModel, cls).__new__(create_class, **kwargs)
-
-#     @classmethod
-#     def register(cls, name):
-#         """ Decorator for registering a submodel """
-#         def wrap(child_class):
-#             """ Wrap the child class and return it """
-#             # Better way to do this?
-#             child_class._get_name = classmethod(lambda x: cls._get_name())
-#             child_class._polyinfo = {
-#                 "parent": cls,
-#                 "name": name
-#             }
-#             cls._child_models[name] = child_class
-#             return child_class
-#         if not isinstance(name, str) and issubclass(name, cls):
-#             # Decorator without arguments
-#             child_cls = name
-#             name = child_cls.__name__.lower()
-#             return wrap(child_cls)
-#         return wrap
-
-#     @classmethod
-#     def _update_search_spec(cls, spec):
-#         """ Update the search specification on child polymodels. """
-#         if hasattr(cls, "_polyinfo"):
-#             name = cls._polyinfo["name"]
-#             polyclass = cls._polyinfo["parent"]
-#             spec = spec or {}
-#             spec.setdefault(polyclass.get_child_key(), name)
-#         return spec
-
-#     @classmethod
-#     def find(cls, spec=None, *args, **kwargs):
-#         """ Add key to search params """
-#         spec = cls._update_search_spec(spec)
-#         return super(PolyModel, cls).find(spec, *args, **kwargs)
-
-#     @classmethod
-#     def find_one(cls, spec=None, *args, **kwargs):
-#         """ Add key to search params for single result """
-#         spec = cls._update_search_spec(spec)
-#         return super(PolyModel, cls).find_one(spec, *args, **kwargs)
+        return "<MagoModel:{} id:{}>".format(self.collection_name(), self.id)
