@@ -273,6 +273,9 @@ class Model(dict, Entity, metaclass=NewModelClass):
     # def __delitem__(self, key):
     #     pass
 
+    def __hash__(self):
+        return hash(self.id)
+
     def __eq__(self, other):
         """
         This method compares two objects names and id values.
