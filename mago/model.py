@@ -1,6 +1,5 @@
 """Core of the lib. It contains the class Model"""
 
-
 import mago
 import logging
 import pickle
@@ -65,23 +64,6 @@ class NewModelClass(type):
 class Entity(object):
     """It contains _only_ class methods related with the entity
     and not the object."""
-    @classmethod
-    def find_one(cls, *args, **kwargs):
-        """
-        Just a wrapper for collection.find_one(). Uses all
-        the same arguments.
-        """
-        if kwargs and not args:
-            # If you get this exception you should probably be calling first,
-            # not find_one. If you really want find_one, pass an empty dict:
-            # Model.find_one({}, timeout=False)
-            raise ValueError(
-                "find_one() requires a query when called with "
-                "keyword arguments")
-        coll = cls.collection()
-        result = coll.find_one(*args, **kwargs)
-        if result:
-            return cls(**result)
 
     @notinstancemethod
     def remove(cls, *args, **kwargs):
@@ -121,6 +103,10 @@ class Entity(object):
             raise ValueError(
                 'find() requires a query when called with keyword arguments')
         return Cursor(cls, *args, **kwargs)
+
+    @classmethod
+    def find_one(cls, where):
+        return cls(**cls.collection().find_one(where))
 
     @classmethod
     def search(cls, **kwargs):

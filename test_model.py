@@ -1,3 +1,4 @@
+#!/usr/bin/python3.2
 """ Various tests for the Model class """
 
 from mago import Field, ReferenceField, Model, connect, UnSet
@@ -32,12 +33,12 @@ class Foo(Model):
 class MagoModelTest(unittest.TestCase):
 
     def setUp(self):
-        super(MagoModelTest, self).setUp()
+        super().setUp()
         self._mongo_connection = connect("__test_model")
         Foo.remove({})
 
     def tearDown(self):
-        super(MagoModelTest, self).tearDown()
+        super().tearDown()
         self._mongo_connection.drop_database("__test_model")
         self._mongo_connection.disconnect()
 
@@ -211,7 +212,3 @@ class MagoModelTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-
-
