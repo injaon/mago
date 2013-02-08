@@ -94,8 +94,7 @@ class Entity(object):
 
     @classmethod
     def find(cls, *args, **kwargs):
-        """A wrapper for the pymongo cursor. Uses all the
-        same arguments."""
+        """A wrapper for the pymongo cursor. Uses all the same arguments."""
         if kwargs and not args:
             # If you get this exception you should probably be calling search,
             # not find. If you really want to call find, pass an empty dict:
@@ -107,25 +106,6 @@ class Entity(object):
     @classmethod
     def find_one(cls, where):
         return cls(**cls.collection().find_one(where))
-
-    @classmethod
-    def search(cls, **kwargs):
-        """
-        Helper method that wraps keywords to dict and automatically
-        turns instances into DBRefs.
-        """
-        query = {}
-        for key, value in kwargs.items():
-            if isinstance(value, Model):
-                value = value.get_ref()
-            field = getattr(cls, key)
-
-            # Try using custom field name in field.
-            if field.field_name:
-                key = field.field_name
-
-            query[key] = value
-        return cls.find(query)
 
 
 class Model(dict, Entity, metaclass=NewModelClass):
