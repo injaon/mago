@@ -5,37 +5,37 @@ clean.
 """
 
 from pymongo.cursor import Cursor as PyCursor
-from pymongo import ASCENDING, DESCENDING
-
-# Shortcuts are better! :)
-ASC = ASCENDING
-DESC = DESCENDING
+from pymongo import ASCENDING as ASC
+from pymongo import DESCENDING as DESC
 
 
 class Cursor(PyCursor):
-    """ A simple wrapper around pymongo's Cursor class. """
+    """A wrapper around pymongo's Cursor class. Return model instance
+    instead of dicts. It can operate with session"""
 
-    def __init__(self, model, *args, **kwargs):
+    def __init__(self, modelcls,  *args, **kwargs):
+        self.session = None
         self._order_entries = []
-        self._model = model
-        PyCursor.__init__(self, model._get_collection(), *args, **kwargs)
+        self._modelcls = modelcls
+        super().__init__(modelcls.collection(), *args, **kwargs)
 
     def __next__(self):
-        value = PyCursor.__next__(self)
-        return self._model(**value)
+        value = super().__next__()
+        if self.session:
+            return self.session._register_clean(self._modelcls(**value))
+        return self._modelcls(**value)
 
-    def __getitem__(self, *args, **kwargs):
-        value = PyCursor.__getitem__(self, *args, **kwargs)
-        if type(value) == self.__class__:
+    def __getitem__(self, index):
+        value = super().__getitem__(index)
+        # I hear you like cursors... so we put a cursor inside a cursor...
+        if type(value) == self.__class__:   # TODO: Probably wrong!
             return value
-        return self._model(**value)
 
-    def first(self):
-        if self.count() == 0:
-            return None
-        return self[0]
+        if self.session:
+            return self.session._register_clean(self._modelcls(**value))
+        return self._modelcls(**value)
 
-    def order(self, **kwargs):
+    def order(self, **kwargs):            # TODO: ???
         if len(kwargs) != 1:
             raise ValueError("order() requires one field = ASC or DESC.")
         for key, value in kwargs.items():
