@@ -52,17 +52,34 @@ class MagoModelTest(unittest.TestCase):
                          session._new, session._deleted, session._clean],
                          [None, None, None, None, None, None])
 
-    def test_roolback(self):
+    def test_rollback(self):
+        Foo.remove({})
+        Foo(foo="bar").save()
+
         session = mago.Session()
         foo = Foo(field='foo')
 
         session.add(foo)
         foo.field = "ups"
         self.assertFalse(foo in session._dirty)
+        self.assertTrue(foo in session._new)
 
         session.rollback()
-        self.assertFalse(foo in session._pool)
 
+        self.assertFalse(foo in session._pool)
+        self.assertFalse(foo in session._dirty)
+        self.assertFalse(foo in session._new)
+
+        it = Foo.find({"foo":"bar"})
+        session.add_all(it)
+        foo = it[0]
+
+        self.assertEqual(len(session._clean), 1)
+        self.assertEqual(len(session._pool), 1)
+        foo.foo = "Im so dirty (lipbite)"
+
+        self.assertTrue(foo in session._dirty)
+        self.assertFalse(foo in session._clean)
 
 if __name__ == "__main__":
     unittest.main()

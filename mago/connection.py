@@ -2,7 +2,7 @@
 from bson.objectid import ObjectId
 from pymongo import Connection as PyConnection
 from pymongo.errors import ConnectionFailure
-from pymongo.collection import Collection as PyCollecton
+from mago.cursor import Cursor
 import urllib.parse as urlparse
 
 
@@ -98,6 +98,10 @@ class Session(object):
 
     def add_all(self, iterable):
         """Adds every elements of an iterable object"""
+        if isinstance(iterable, Cursor):
+            iterable.session = self
+            return
+
         for model in iterable:
             self.add(model)
 
@@ -117,6 +121,13 @@ class Session(object):
 
         if attr not in self._bkp_pool[model.id]:
             self._bkp_pool[model.id] = model[attr]
+
+    def _register_clean(self, model):
+        """Adds model to the session in state clean. It _must_ be
+        synchronized with the values in the db."""
+        self._pool[model.id] = [model, self._clean]
+        self._clean.add(model)
+        return model
 
     def close(self):
         """Delete everything related with session"""
@@ -183,9 +194,6 @@ class Session(object):
                 self._new(model)
 
             return model
-
-    def query(self):
-        pass
 
     def commit(self):
         """It makes every change to the database or raise an exception"""

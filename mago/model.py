@@ -137,6 +137,7 @@ class Model(dict, Entity, metaclass=NewModelClass):
 
     def __init__(self, **kwargs):
         """Creates an instance of the model, without saving it."""
+        # TODO: change DBRef for instances
         super(Model, self).__init__()
         Entity.__init__(self)
         if self.__class__ is Model:

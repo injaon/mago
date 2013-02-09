@@ -30,6 +30,10 @@ class Foo(Model):
     # reference = ReferenceField(Ref)
 
 
+class Small(Model):
+    foo = Field()
+
+
 class MagoModelTest(unittest.TestCase):
 
     def setUp(self):
@@ -42,7 +46,6 @@ class MagoModelTest(unittest.TestCase):
         self._mongo_connection.drop_database("__test_model")
         self._mongo_connection.disconnect()
 
-    # @unittest.skip("pinto")
     def test_model_fields_init(self):
         """ Test that the model properly retrieves the fields """
         foo = Foo()
@@ -52,7 +55,6 @@ class MagoModelTest(unittest.TestCase):
         # self.assertTrue("callback" in foo._fields.keys())
         # self.assertTrue("reference" in foo._fields.keys())
 
-    # @unittest.skip("pinto")
     def test_basic_operations(self):
         foo = Foo(foo="bar")
         self.assertEqual(foo.id, UnSet)
@@ -96,47 +98,32 @@ class MagoModelTest(unittest.TestCase):
         self.assertEqual(NotAModel.class_attr, other_foo.obj.__class__.class_attr)
         self.assertEqual(len(foo.copy()), len(other_foo.copy()))
 
+    def test_queries(self):
+        Small.remove({})
+        Small(foo="foo").save()
+        Small(foo="bar").save()
+        Small(foo="foobar").save()
+
+        cursor = Small.find({"foo":"bara"})
+        self.assertEqual(cursor.count(), 0)
+        cursor = Small.find({"foo":"bar"})
+        self.assertEqual(cursor.count(), 1)
+        self.assertEqual(type(cursor.first()), Small)
 
 
 
 
-
-
-
-
-    # def test_model_add_field(self):
-    #     """ Tests the ability to add a field. """
-    #     class Testing(Model):
-    #         pass
-    #     Testing.add_field(
-    #         "foo", Field(str, set_callback=lambda x, y: "bar"))
-    #     self.assertTrue(isinstance(Testing.foo, Field))
-    #     testing = Testing(foo="whatever")
-    #     self.assertEqual(testing["foo"], "bar")
-    #     self.assertEqual(testing.foo, "bar")
-    #     # TODO: __setattr__ behavior
 
     # def test_null_reference(self):
     #     foo = Foo()
     #     foo.reference = None
     #     self.assertEqual(foo.reference, None)
 
-    # def test_repr(self):
-    #     foo = Foo()
-    #     foo["_id"] = 5
-    #     self.assertEqual(str(foo), "<MagoModel:foo id:5>")
-
     # def test_reference_subclass(self):
     #     foo = Foo()
     #     child_ref = ChildRef(_id="testing")  # hardcoding id
     #     foo.reference = child_ref
     #     self.assertEqual(foo["reference"].id, child_ref.id)
-
-    # def test_id(self):
-    #     foo = Foo(_id="whoop")
-    #     self.assertEqual(foo.id, "whoop")
-    #     self.assertEqual(foo._id, "whoop")
-    #     self.assertEqual(foo['_id'], "whoop")
 
     # def test_inheritance(self):
     #     self.assertEqual(Person._get_name(), Child._get_name())
@@ -163,51 +150,6 @@ class MagoModelTest(unittest.TestCase):
     #     infant2 = Person(age=3, role="infant")
     #     self.assertTrue(isinstance(infant2, Infant))
 
-
-
-# class Ref(Model):
-#     pass
-
-
-
-
-# class Bar(Model):
-#     uid = Field(str)
-
-
-# class ChildRef(Ref):
-#     pass
-
-
-# class Person(PolyModel):
-
-#     @classmethod
-#     def get_child_key(cls):
-#         return "role"
-
-#     role = Field(str, default="person")
-
-#     def walk(self):
-#         """ Default method """
-#         return True
-
-
-# @Person.register
-# class Child(Person):
-#     role = Field(str, default="child")
-
-
-# @Person.register(name="infant")
-# class Infant(Person):
-#     age = Field(int, default=3)
-
-#     def crawl(self):
-#         """ Example of a custom method """
-#         return True
-
-#     def walk(self):
-#         """ Overwriting a method """
-#         return False
 
 
 if __name__ == "__main__":
