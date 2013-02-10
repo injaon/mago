@@ -1,4 +1,4 @@
-import mago
+# import mago
 """Just various decorators."""
 
 
@@ -12,6 +12,7 @@ class notinstancemethod(object):
             raise TypeError("Cannot call this method on an instance.")
         return self.func.__get__(obj, objtype)
 
+
 def register_dirty(func):
     def _register(self, name, *args, **kwargs):
         old = self.get(name, mago.UnSet)
@@ -24,11 +25,12 @@ def register_dirty(func):
     return _register
 
 
+def singleton(cls):
+    """This Class decorator implements the Singleton design pattern."""
+    instances = {}
 
-# def singleton(cls):
-#     instances = {}
-#     def getinstance():
-#         if cls not in instances:
-#             instances[cls] = cls()
-#         return instances[cls]
-#     return getinstance
+    def instance():
+        if cls not in instances:
+            instances[cls] = cls()
+        return instances[cls]
+    return instance
