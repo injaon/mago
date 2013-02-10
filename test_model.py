@@ -108,7 +108,7 @@ class MagoModelTest(unittest.TestCase):
         self.assertEqual(cursor.count(), 0)
         cursor = Small.find({"foo":"bar"})
         self.assertEqual(cursor.count(), 1)
-        self.assertEqual(type(cursor.first()), Small)
+        self.assertEqual(type(cursor[0]), Small)
 
 
 

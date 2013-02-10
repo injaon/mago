@@ -21,9 +21,7 @@ class Cursor(PyCursor):
 
     def __next__(self):
         value = super().__next__()
-        if self.session:
-            return self.session._register_clean(self._modelcls(**value))
-        return self._modelcls(**value)
+        return self._cast(**value)
 
     def __getitem__(self, index):
         value = super().__getitem__(index)
@@ -31,9 +29,14 @@ class Cursor(PyCursor):
         if type(value) == self.__class__:   # TODO: Probably wrong!
             return value
 
+        return self._cast(**value)
+
+    def _cast(self, **kwargs):
+        model = self._modelcls(**kwargs)
         if self.session:
-            return self.session._register_clean(self._modelcls(**value))
-        return self._modelcls(**value)
+            model.set_session(self.session)
+            return self.session._register_clean(model)
+        return model
 
     def order(self, **kwargs):            # TODO: ???
         if len(kwargs) != 1:

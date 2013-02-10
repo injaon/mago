@@ -7,6 +7,7 @@ from mago.connection import Connection
 from mago.cursor import Cursor
 from mago.field import Field
 from mago.decorators import notinstancemethod
+from mago.decorators import register_dirty
 from mago.types import NATIVE_TYPES
 from bson.dbref import DBRef
 from bson.objectid import ObjectId
@@ -107,7 +108,6 @@ class Entity(object):
     def find_one(cls, where):
         return cls(**cls.collection().find_one(where))
 
-
 class Model(dict, Entity, metaclass=NewModelClass):
     """Core class of the module. It is disigned to be inherited."""
 
@@ -119,6 +119,22 @@ class Model(dict, Entity, metaclass=NewModelClass):
     def fields(self):
         """ Property wrapper for class fields """
         return self.__class__._fields
+
+    @property
+    def session(self):
+        return Entity.__getattribute__(self, '_session')
+
+    # @session.setter
+    def set_session(self, value):
+        Entity.__setattr__(self, '_session', value)
+
+    @property
+    def state(self):
+        return Entity.__getattribute__(self, '_state')
+
+    # @state.setter
+    def _set_state(self, value):
+        Entity.__setattr__(self, '_state', value)
 
     @property
     def id(self):
@@ -138,13 +154,13 @@ class Model(dict, Entity, metaclass=NewModelClass):
     def __init__(self, **kwargs):
         """Creates an instance of the model, without saving it."""
         # TODO: change DBRef for instances
-        super(Model, self).__init__()
+        dict.__init__(self)
         Entity.__init__(self)
         if self.__class__ is Model:
             raise TypeError("Cannot instance Model.")
 
-        Entity.__setattr__(self, 'session', None)
-
+        self.set_session(None)
+        self._set_state(None)
         for name, field in self._fields.items():
             if field.default is not mago.UnSet:
                 self[name] = field.default
@@ -207,6 +223,7 @@ class Model(dict, Entity, metaclass=NewModelClass):
             field.check(value)
 
     # setters
+    @register_dirty
     def __setattr__(self, name, value):
         if value.__class__ is dict and value.get("__class__"):
             value = dict_to_obj(value)
@@ -215,9 +232,6 @@ class Model(dict, Entity, metaclass=NewModelClass):
             self._fields[name].__set__(self, value)
         else:
             dict.__setitem__(self, name, value)
-
-        if Entity.__getattribute__(self, 'session'):
-            Entity.__getattribute__(self, 'session')._register_dirty(self)
 
     def __setitem__(self, key, value):
         self.__setattr__(key, value)
@@ -231,14 +245,15 @@ class Model(dict, Entity, metaclass=NewModelClass):
     def __getitem__(self, key):
         return self.__getattr__(key)
 
-    # TODO: when remove a values it changes to dirty
-
     # dellers
-    # def __delattr__(self, name):
-    #     pass
+    @register_dirty
+    def __delattr__(self, name):
+        if name == "_id":
+            raise KeyError("You cannot delete a model's `id`")
+        dict.__delitem__(self, name)
 
-    # def __delitem__(self, key):
-    #     pass
+    def __delitem__(self, key):
+        self.__delattr__(key)
 
     def __hash__(self):
         return hash(self.id)
@@ -252,7 +267,7 @@ class Model(dict, Entity, metaclass=NewModelClass):
             return False
         this_id = self.id
         other_id = other.id
-        if self.__class__.__name__ == other.__class__.__name__ and \
+        if self.__class__ is other.__class__ and \
                 this_id and other_id and this_id == other_id:
             return True
         return False
