@@ -1,4 +1,4 @@
-# import mago
+import mago
 """Just various decorators."""
 
 

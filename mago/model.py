@@ -147,8 +147,7 @@ class Model(dict, Entity, metaclass=NewModelClass):
     @classmethod
     def collection(cls):
         if not cls._collection:
-            cls._collection = Connection.instance().get_collection(
-                cls._name)
+            cls._collection = Connection().get_collection(cls._name)
         return cls._collection
 
     def __init__(self, **kwargs):

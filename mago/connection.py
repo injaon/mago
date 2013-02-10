@@ -4,9 +4,10 @@ from pymongo import Connection as PyConnection
 from pymongo.errors import ConnectionFailure
 from mago.cursor import Cursor
 import mago
+import mago.decorators
 import urllib.parse as urlparse
 
-
+@mago.decorators.singleton
 class Connection(object):
     """This just caches a pymongo connection and adds a few shortcuts."""
 
@@ -16,19 +17,9 @@ class Connection(object):
     _port = None
     _database = None
 
-    @classmethod
-    def instance(cls):
-        """ Retrieves the shared connection. """
-        if not cls._instance:
-            cls._instance = Connection()
-        return cls._instance
-
-    @classmethod
-    def connect(cls, database=None, *args, **kwargs):
-        """
-        Wraps a pymongo connection.
-        TODO: Allow some of the URI stuff.
-        """
+    def connect(self, database=None, *args, **kwargs):
+        """ Wraps a pymongo connection.
+        TODO: Allow some of the URI stuff."""
         if "uri" in kwargs:
             uri = kwargs.pop("uri")
             parsed_uri = urlparse.urlparse(uri)
@@ -44,10 +35,10 @@ class Connection(object):
             kwargs["host"] = urlparse.urlunparse(parsed_uri)
         elif not database:
             raise TypeError("A database name or uri is required to connect.")
-        conn = cls.instance()
-        conn._database = database
-        conn.connection = PyConnection(*args, **kwargs)
-        return conn.connection
+
+        self._database = database
+        self.connection = PyConnection(*args, **kwargs)
+        return self.connection
 
     def get_database(self, database=None):
         """ Retrieves a database from an existing connection. """
@@ -70,7 +61,7 @@ def connect(*args, **kwargs):
     the pymongo connection object so that end_request, etc.
     can be called if necessary.
     """
-    return Connection.connect(*args, **kwargs)
+    return Connection().connect(*args, **kwargs)
 
 
 class Session(object):
