@@ -6,6 +6,7 @@ from mago.cursor import Cursor
 import mago
 import mago.decorators
 import urllib.parse as urlparse
+import copy
 
 @mago.decorators.singleton
 class Connection(object):
@@ -75,10 +76,15 @@ class Session(object):
     def is_active(self):
         return self._pool is not None
 
+    @property
+    def dirty(self):
+        return frozenset(self._states[Session.DIRTY])
+
     def __init__(self, autocommit=True):
         self._autocommit = autocommit
-        self._bkp_pool = {}  # oid => dict
-        self._pool = {}  # ObjectId => (model)
+        self._tracking = True
+        self._bkp_pool = {}               # oid => dict
+        self._pool = {}                   # ObjectId => (model)
         self._states = [set(), set(), set(), set()]
 
     def _to_state(self, model, state, new=False):
@@ -90,8 +96,9 @@ class Session(object):
     def add(self, model):
         """Adds a model to the session. It marks the model to be stored
         in the next commit call"""
-        if not model.id:                  # TODO: else: ...
+        if not model.id:
             model['_id'] = ObjectId()
+        if not (model.session is self):
             self._to_state(model, Session.NEW, new=True)
             model.session = self
             self._pool[model.id] = model
@@ -110,7 +117,7 @@ class Session(object):
         it moves the model to clean or dirty and stores the first value
         in case.
         New models and deleted are ignored"""
-        if model.state in [Session.NEW, Session.DELETED]:
+        if not self._tracking or model.state in [Session.NEW, Session.DELETED]:
             return
 
         if not self._bkp_pool.get(model.id):
@@ -140,29 +147,28 @@ class Session(object):
         # clear everything
         self._bkp_pool.clear()
         self._pool.clear()
-        self._states[Session.DIRTY].clear()
-        self._states[Session.NEW].clear()
-        self._states[Session.DELETED].clear()
-        self._states[Session.CLEAN].clear()
+        del self._states
+
         # remove instances
-        self._bkp_pool = self._pool = self._states[Session.DIRTY] = \
-          self._states[Session.NEW] = self._states[Session.DELETED] = \
-          self._states[Session.CLEAN] = None
+        self._bkp_pool = self._pool = self._states = None
 
     def expunge(self, model):
         """Remove the model from the session"""
         del self._pool[model.id]
+        self._states[model.state].remove(model)
         model._set_state(None)
         model.set_session(None)
 
     def delete(self, model):
         """Marks a model to be deleted in next commit call"""
         # TODO: delete() => add() ¿?
+        # TODO: delete() a NEW??
         if model.id not in self._pool:
             raise ValueError("model is not in session.")
+        if model.state is Session.NEW:
+            return self.expunge(model)
 
         self._to_state(model, Session.DELETED)
-        del self._pool[model.id]
 
     def _merge(self, model, source):
         """Helper method for merge"""
@@ -220,29 +226,23 @@ class Session(object):
 
     def rollback(self):
         """Changes the objects to the state where the transaction started"""
+        # rolling-back dirty models
+        self._tracking = False    # Don't track
         for oid, old in self._bkp_pool.items():
             for attr, val in old.items():
-                self._pool[oid]._set_state(Session.NEW)   # Don't track changes
                 self._pool[oid][attr] = val
-                self._pool[oid]._set_state(Session.DIRTY)   # Don't track changes
                 self._to_state(self._pool[oid], Session.CLEAN)
-
+        self._tracking = True     # keep tracking!
 
         self._bkp_pool.clear()
+        assert len(self._states[Session.DIRTY]) == 0
 
-        # que hago con
-        # from pprint import pprint
-        # pprint(self._states)
-        # pprint(self._pool)
+        # new models
+        [self.expunge(model)
+        for model in self._states[Session.NEW].copy()]
+        assert len(self._states[Session.NEW]) == 0
 
-        [(self._pool.pop(model.id), model._set_state(None))
-        for model in self._states[Session.NEW]]
-        # for model in self._states[Session.NEW]:
-        #     print(model)
-        #     self._pool.pop(model.id)
-        #     model._set_state(None)
-
-
-        self._states[Session.DIRTY].clear()
-        self._states[Session.NEW].clear()
-        self._states[Session.DELETED].clear()
+        # deleted model
+        [self._to_state(model, Session.CLEAN)
+        for model in self._states[Session.DELETED].copy()]
+        assert len(self._states[Session.DELETED]) == 0

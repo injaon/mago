@@ -48,12 +48,8 @@ class MagoModelTest(unittest.TestCase):
         session.close()
 
         # everything must be destroyed
-        self.assertEqual([session._bkp_pool, session._pool,
-                          session._states[mago.Session.DELETED],
-                          session._states[mago.Session.NEW],
-                          session._states[mago.Session.DELETED],
-                          session._states[mago.Session.CLEAN]],
-                         [None, None, None, None, None, None])
+        self.assertEqual([session._bkp_pool, session._pool, session._states],
+                         [None, None, None])
 
     # @unittest.skip("pinto")
     def test_rollback(self):
@@ -93,11 +89,17 @@ class MagoModelTest(unittest.TestCase):
         self.assertTrue(foo.foo, "bar")
 
         # delete something
-        # session.delete(foo)
-        # self.assertTrue(foo.state is mago.Session.DELETED)
+        session.delete(foo)
+        self.assertTrue(foo.state is mago.Session.DELETED)
 
-        # session.rollback()
-        # self.assertTrue(foo.state is mago.Session.CLEAN)
+        session.rollback()
+        self.assertTrue(foo.state is mago.Session.CLEAN)
+
+        foo.foo = "i'm dirty"
+        session.delete(foo)
+        session.rollback()
+        self.assertTrue(foo.foo, "bar")
+        self.assertTrue(foo.state is mago.Session.CLEAN)
 
         # TODO: sup with del foo.bar
 
