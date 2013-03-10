@@ -3,12 +3,11 @@
 import mago
 import logging
 import pickle
-from mago.connection import Connection
-from mago.cursor import Cursor
-from mago.field import Field
-from mago.decorators import notinstancemethod
-from mago.decorators import register_dirty
-from mago.types import NATIVE_TYPES
+import mago.connection
+import mago.cursor
+import mago.field
+import mago.decorators
+import mago.types
 from bson.dbref import DBRef
 from bson.objectid import ObjectId
 
@@ -21,7 +20,7 @@ def obj_to_dict(obj):
     res["__class__"] = pickle.dumps(obj.__class__, 3)
     for attr in obj.__dict__:
         val = getattr(obj, attr)
-        if type(val) not in NATIVE_TYPES:
+        if type(val) not in mago.types.NATIVE:
             res[attr] = obj_to_dict(val)
             res[attr]["__class__"] = pickle.dumps(val.__class__, 3)
         else:
@@ -54,7 +53,7 @@ class NewModelClass(type):
         new_model._fields = {}
         for attr in dir(new_model):
             value = getattr(new_model, attr)
-            if not isinstance(value, Field):
+            if not isinstance(value, mago.field.Field):
                 continue
 
             new_model._fields[attr] = value
@@ -66,32 +65,10 @@ class Entity(object):
     """It contains _only_ class methods related with the entity
     and not the object."""
 
-    @notinstancemethod
-    def remove(cls, *args, **kwargs):
-        """Just a wrapper around the collection's remove."""
-        if not args:
-            # If you get this exception you are calling remove with no
-            # arguments or with only keyword arguments, which is not
-            # supported (and would remove all entries in the current
-            # collection if it was.) If you really want to delete
-            # everything in a collection, pass an empty dictionary like
-            # Model.remove({})
-            raise ValueError(
-                'remove() requires a query when called with keyword arguments')
-        return cls.collection().remove(*args, **kwargs)
-
-    @notinstancemethod
+    @mago.decorators.notinstancemethod
     def drop(cls, *args, **kwargs):
         """ Just a wrapper around the collection's drop. """
         return cls.collection().drop(*args, **kwargs)
-
-    @classmethod
-    def update(cls, *args, **kwargs):
-        """Direct passthru to PyMongo's update."""
-        coll = cls.collection()
-        # Maybe should do something 'clever' with the query?
-        # E.g. transform Model instances to DBRefs automatically?
-        return coll.update(*args, **kwargs)
 
     @classmethod
     def find(cls, *args, **kwargs):
@@ -102,11 +79,12 @@ class Entity(object):
             # Model.find({}, timeout=False)
             raise ValueError(
                 'find() requires a query when called with keyword arguments')
-        return Cursor(cls, *args, **kwargs)
+        return mago.cursor.Cursor(cls, *args, **kwargs)
 
     @classmethod
     def find_one(cls, where):
-        return cls(**cls.collection().find_one(where))
+        doc = cls.collection().find_one(where)
+        return cls(**doc) if doc else None
 
 class Model(dict, Entity, metaclass=NewModelClass):
     """Core class of the module. It is disigned to be inherited."""
@@ -121,22 +99,6 @@ class Model(dict, Entity, metaclass=NewModelClass):
         return self.__class__._fields
 
     @property
-    def session(self):
-        return Entity.__getattribute__(self, '_session')
-
-    # @session.setter
-    def set_session(self, value):
-        Entity.__setattr__(self, '_session', value)
-
-    @property
-    def state(self):
-        return Entity.__getattribute__(self, '_state')
-
-    # @state.setter
-    def _set_state(self, value):
-        Entity.__setattr__(self, '_state', value)
-
-    @property
     def id(self):
         return self.get('_id', mago.UnSet)
 
@@ -147,7 +109,8 @@ class Model(dict, Entity, metaclass=NewModelClass):
     @classmethod
     def collection(cls):
         if not cls._collection:
-            cls._collection = Connection().get_collection(cls._name)
+            cls._collection = mago.connection.Connection()\
+              .get_collection(cls._name)
         return cls._collection
 
     def __init__(self, **kwargs):
@@ -158,8 +121,8 @@ class Model(dict, Entity, metaclass=NewModelClass):
         if self.__class__ is Model:
             raise TypeError("Cannot instance Model.")
 
-        self.set_session(None)
-        self._set_state(None)
+        self.session = None
+        self.state = None
         for name, field in self._fields.items():
             if field.default is not mago.UnSet:
                 self[name] = field.default
@@ -167,18 +130,19 @@ class Model(dict, Entity, metaclass=NewModelClass):
         for field, value in kwargs.items():
             self[field] = value
 
+        if not '_id' in self:
+            dict.__setitem__(self,'_id', ObjectId())
+
     def save(self, *args, **kwargs):
-        """Saves or updates the model in the database"""
-        if self.id:
-            return self.sync()
+        """Saves the model in the database"""
         self._check_attrs()
         store = self.copy()
         for key, val in self.items():
-            if type(val) not in NATIVE_TYPES:
+            if type(val) not in mago.types.NATIVE:
                 store[key] = obj_to_dict(val)
 
-        coll = self.collection()
-        dict.__setitem__(self, '_id', coll.save(store, *args, **kwargs))
+        self.collection().save(store, *args, **kwargs)
+        # dict.__setitem__(self, '_id', )
         return self
 
     def sync(self):
@@ -189,10 +153,9 @@ class Model(dict, Entity, metaclass=NewModelClass):
         self._check_attrs()
         coll = self.collection()
         doc = self.copy()
-        del doc[self._id]
 
         # TODO: why??
-        return coll.update({self._id: self.id},
+        return coll.update({'_id': self.id},
                            {"$set": doc})
 
     def delete(self):
@@ -222,37 +185,29 @@ class Model(dict, Entity, metaclass=NewModelClass):
             field.check(value)
 
     # setters
-    @register_dirty
-    def __setattr__(self, name, value):
+    @mago.decorators.register_dirty
+    def __setitem__(self, key, value):
         if value.__class__ is dict and value.get("__class__"):
             value = dict_to_obj(value)
 
-        if name in self._fields.keys():
-            self._fields[name].__set__(self, value)
+        if key in self._fields.keys():
+            self._fields[key].__set__(self, value)
         else:
-            dict.__setitem__(self, name, value)
-
-    def __setitem__(self, key, value):
-        self.__setattr__(key, value)
+            dict.__setitem__(self, key, value)
 
     # getters
-    def __getattr__(self, name):
-        if name in self._fields.keys():
-            return self._fields[name].__get__(self, name)
-        return self.get(name, mago.UnSet)
-
+    @mago.decorators.register_dirty
     def __getitem__(self, key):
-        return self.__getattr__(key)
+        if key in self._fields.keys():
+            return self._fields[key].__get__(self, key)
+        return self.get(key, mago.UnSet)
 
     # dellers
-    @register_dirty
-    def __delattr__(self, name):
-        if name == "_id":
+    @mago.decorators.register_dirty
+    def __delitem__(self, key):           # TODO: del model.id ??
+        if key == "_id":
             raise KeyError("You cannot delete a model's `id`")
-        dict.__delitem__(self, name)
-
-    def __delitem__(self, key):
-        self.__delattr__(key)
+        dict.__delitem__(self, key)
 
     def __hash__(self):
         return hash(self.id)
