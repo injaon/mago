@@ -34,7 +34,7 @@ class Cursor(PyCursor):
     def _cast(self, **kwargs):
         model = self._modelcls(**kwargs)
         if self.session:
-            model.set_session(self.session)
+            model._session = self.session
             return self.session._register_clean(model)
         return model
 

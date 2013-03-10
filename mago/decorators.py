@@ -18,9 +18,9 @@ def register_dirty(func):
         old = self.get(name, mago.UnSet)
         res = func(self, name, *args, **kwargs)
 
-        if old != self.get(name, mago.UnSet) and self.session \
-          and self.session.is_active:
-            self.session._register_change(self, name, old)
+        if old != self.get(name, mago.UnSet) and self._session \
+          and self._session.is_active:
+            self._session._register_change(self, name, old)
         return res
     return _register
 

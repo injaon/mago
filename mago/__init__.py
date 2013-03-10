@@ -1,19 +1,21 @@
 """ This is the mago syntactic sugar library for MongoDB. """
 
-from mago.model import Model
-from mago.field import Field, ReferenceField, ConstantField, EnumField, FieldError
+# from mago.model import Model
+import mago.types
+
+# from mago.transaction import Transaction
+from mago.field import Field, ReferenceField, ConstantField, EnumField, \
+      FieldError
 from mago.cursor import ASC, DESC
 from mago.connection import connect, Session
-from mago.types import NATIVE_TYPES, UnSetType
+import mago.model
 
-# Allows flexible (probably dangerous) automatic field creation for
-# /really/ schemaless designs.
-AUTO_CREATE_FIELDS = False
 
-UnSet = UnSetType()
-
-__all__ = [
-    'Model', 'Field', 'ReferenceField', "ConstantField", "FieldError",
-    "EnumField", 'connect', 'Session', 'ASC', 'DESC', "AUTO_CREATE_FIELDS",
-    "UnSet", "NATIVE_TYPES"
-]
+Model = mago.model.Model
+UnSet = mago.types.UnSetType()
+version = '0.0.1~unreleased'
+# __all__ = [
+#     'Model', 'Field', 'ReferenceField', 'ConstantField', 'FieldError',
+#     'EnumField', 'connect', 'Session', 'ASC', 'DESC', 'UnSet', 'NATIVE_TYPES',
+#     'version'
+# ]

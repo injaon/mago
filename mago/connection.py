@@ -2,17 +2,17 @@
 from bson.objectid import ObjectId
 from pymongo import Connection as PyConnection
 from pymongo.errors import ConnectionFailure
-from mago.cursor import Cursor
 import mago
+from mago.cursor import Cursor
+import mago.transaction as tran
 import mago.decorators
 import urllib.parse as urlparse
-import copy
+
 
 @mago.decorators.singleton
 class Connection(object):
     """This just caches a pymongo connection and adds a few shortcuts."""
 
-    _instance = None
     connection = None
     _host = None
     _port = None
@@ -66,7 +66,7 @@ def connect(*args, **kwargs):
 
 
 class Session(object):
-    """It implements unit of work and transaction"""
+    """It implements unit of work and transactions."""
     DIRTY = 0
     NEW = 1
     DELETED = 2
@@ -80,6 +80,18 @@ class Session(object):
     def dirty(self):
         return frozenset(self._states[Session.DIRTY])
 
+    @property
+    def new(self):
+        return frozenset(self._states[Session.NEW])
+
+    @property
+    def deleted(self):
+        return frozenset(self._states[Session.DELETED])
+
+    @property
+    def clean(self):
+        return frozenset(self._states[Session.CLEAN])
+
     def __init__(self, autocommit=True):
         self._autocommit = autocommit
         self._tracking = True
@@ -89,19 +101,21 @@ class Session(object):
 
     def _to_state(self, model, state, new=False):
         if not new:
-            self._states[model.state].remove(model)
-        model._set_state(state)
-        self._states[model.state].add(model)
+            self._states[model._state].remove(model)
+        model._state = state
+        self._states[model._state].add(model)
 
     def add(self, model):
         """Adds a model to the session. It marks the model to be stored
         in the next commit call"""
         if not model.id:
             model['_id'] = ObjectId()
-        if not (model.session is self):
+        if not model._session is self:
             self._to_state(model, Session.NEW, new=True)
-            model.session = self
+            model._session = self
             self._pool[model.id] = model
+        elif model._state is Session.DELETED:
+            self._to_state(mode, Session.NEW)
 
     def add_all(self, iterable):
         """Adds every elements of an iterable object"""
@@ -117,7 +131,7 @@ class Session(object):
         it moves the model to clean or dirty and stores the first value
         in case.
         New models and deleted are ignored"""
-        if not self._tracking or model.state in [Session.NEW, Session.DELETED]:
+        if not self._tracking or model._state in [Session.NEW, Session.DELETED]:
             return
 
         if not self._bkp_pool.get(model.id):
@@ -155,17 +169,15 @@ class Session(object):
     def expunge(self, model):
         """Remove the model from the session"""
         del self._pool[model.id]
-        self._states[model.state].remove(model)
-        model._set_state(None)
-        model.set_session(None)
+        self._states[model._state].remove(model)
+        model._state = None
+        model._session = None
 
     def delete(self, model):
         """Marks a model to be deleted in next commit call"""
-        # TODO: delete() => add() ¿?
-        # TODO: delete() a NEW??
         if model.id not in self._pool:
             raise ValueError("model is not in session.")
-        if model.state is Session.NEW:
+        if model._state is Session.NEW:
             return self.expunge(model)
 
         self._to_state(model, Session.DELETED)
@@ -209,23 +221,27 @@ class Session(object):
 
     def commit(self):
         """It makes every change to the database or raise an exception"""
-        for model in self._states[Session.NEW]:
-            model.save()
-            self._states[Session.CLEAN].add(model)
-        self._states[Session.NEW].clear()
+        t = tran.Transaction()
+        t.insert(self._states[Session.NEW])
+        t.update(self._states[Session.DIRTY])
+        t.remove(self._states[Session.DELETED])
+        t.commit()
 
-        for model in self._states[Session.DIRTY]:
-            model.sync()
-            self._states[Session.CLEAN].add(model)
+        # correct states
+        self._states[Session.CLEAN].update(self._states[Session.NEW])
+        self._states[Session.CLEAN].update(self._states[Session.DIRTY])
+        [model.__setattr__('_state', Session.CLEAN) for model in
+         self._states[Session.NEW].union(self._states[Session.DIRTY])]
+
+        self._states[Session.NEW].clear()
         self._states[Session.DIRTY].clear()
 
+        # purge from session
         for model in self._states[Session.DELETED]:
-            model.delete()
-            self._states[Session.CLEAN].add(model)
-        self._states[Session.DELETED].clear()
+            self.expunge(model)
 
     def rollback(self):
-        """Changes the objects to the state where the transaction started"""
+        """Changes all the models to the state where the transaction started"""
         # rolling-back dirty models
         self._tracking = False    # Don't track
         for oid, old in self._bkp_pool.items():
@@ -239,10 +255,10 @@ class Session(object):
 
         # new models
         [self.expunge(model)
-        for model in self._states[Session.NEW].copy()]
+        for model in self.new]
         assert len(self._states[Session.NEW]) == 0
 
         # deleted model
         [self._to_state(model, Session.CLEAN)
-        for model in self._states[Session.DELETED].copy()]
+        for model in self.deleted]
         assert len(self._states[Session.DELETED]) == 0

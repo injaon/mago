@@ -1,7 +1,8 @@
 """Some types definitions used in mago"""
 from datetime import datetime
+from bson.objectid  import ObjectId
 
-NATIVE_TYPES = (list, dict, tuple, int, float, bool, str, datetime)
+NATIVE = (list, dict, tuple, int, float, bool, str, datetime, ObjectId)
 
 class UnSetType:
     def __bool__(self):

@@ -9,7 +9,7 @@ class MagoModelTest(unittest.TestCase):
     def setUp(self):
         super().setUp()
         self._mongo_connection = mago.connect("__test_model")
-        Foo.remove({})
+        Foo.collection().remove({})
 
     def tearDown(self):
         super().tearDown()

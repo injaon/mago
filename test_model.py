@@ -5,10 +5,12 @@ from mago import Field, ReferenceField, Model, connect, UnSet
 from bson import ObjectId
 import unittest
 
+
 class Bar(object):
     bar = "open bar"
     def __init__(self):
         self.close = "almost a model"
+
 
 class NotAModel(object):
     class_attr = "class...ic"
@@ -20,8 +22,8 @@ class NotAModel(object):
     def method(self):
         return "just a {wait_for_it}".format(wait_for_it=self.obj_attr)
 
-class Foo(Model):
 
+class Foo(Model):
     field = Field()
     default = Field(default="default")
     _private_field = Field()
@@ -39,7 +41,7 @@ class MagoModelTest(unittest.TestCase):
     def setUp(self):
         super().setUp()
         self._mongo_connection = connect("__test_model")
-        Foo.remove({})
+        Foo.collection().remove({})
 
     def tearDown(self):
         super().tearDown()
@@ -57,7 +59,7 @@ class MagoModelTest(unittest.TestCase):
 
     def test_basic_operations(self):
         foo = Foo(foo="bar")
-        self.assertEqual(foo.id, UnSet)
+        self.assertEqual(type(foo.id), ObjectId)
         before_saved = foo.copy()
         foo.save()
 
@@ -73,33 +75,44 @@ class MagoModelTest(unittest.TestCase):
             self.assertEqual(foo[k], v)
         self.assertEqual(len(foo), len(same_foo), len(before_saved) + 1)
 
+        # sync
+        foo["attr"] = "new"
+        foo.sync()
+        doc = foo.collection().find({"attr": "new"})[0]
+        same_doc = foo.copy()
+        self.assertEqual(doc, same_doc)
+
+        # delete
+        foo.delete()
+        self.assertRaises(IndexError, lambda:
+                          foo.collection().find({"attr": "new"})[0])
+
     def test_custom_obj_store(self):
         foo = Foo()    # a model
-        foo.custom = "custom"
+        foo["custom"] = "value"
         obj = NotAModel()
-        foo.obj = obj
+        foo["obj"] = obj
         foo.save()
-        other_foo = Foo.find_one({"custom" : "custom"})
-
+        other_foo = Foo.find_one({"custom" : "value"})
         self.assertEqual(foo, other_foo)
 
         # test types
-        self.assertEqual(type(foo.obj), type(other_foo.obj))
-        self.assertEqual(type(foo.obj), type(obj))
-        self.assertEqual(type(foo.obj), NotAModel)
+        self.assertEqual(type(foo["obj"]), type(other_foo["obj"]))
+        self.assertEqual(type(foo["obj"]), type(obj))
+        self.assertEqual(type(foo["obj"]), NotAModel)
 
         # test object
-        self.assertEqual(foo.obj.method(), other_foo.obj.method())
-        self.assertEqual(foo.obj.method(), obj.method())
+        self.assertEqual(foo["obj"].method(), other_foo["obj"].method())
+        self.assertEqual(foo["obj"].method(), obj.method())
 
-        self.assertEqual(foo.obj._so.close, other_foo.obj._so.close)
-        self.assertEqual(foo.obj._so.__class__.bar,
-                         other_foo.obj._so.__class__.bar)
-        self.assertEqual(NotAModel.class_attr, other_foo.obj.__class__.class_attr)
+        self.assertEqual(foo["obj"]._so.close, other_foo["obj"]._so.close)
+        self.assertEqual(foo["obj"]._so.__class__.bar,
+                         other_foo["obj"]._so.__class__.bar)
+        self.assertEqual(NotAModel.class_attr, other_foo["obj"].__class__.class_attr)
         self.assertEqual(len(foo.copy()), len(other_foo.copy()))
 
     def test_queries(self):
-        Small.remove({})
+        Small.collection().remove({})
         Small(foo="foo").save()
         Small(foo="bar").save()
         Small(foo="foobar").save()
@@ -109,9 +122,6 @@ class MagoModelTest(unittest.TestCase):
         cursor = Small.find({"foo":"bar"})
         self.assertEqual(cursor.count(), 1)
         self.assertEqual(type(cursor[0]), Small)
-
-
-
 
 
     # def test_null_reference(self):

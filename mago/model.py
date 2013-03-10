@@ -121,8 +121,8 @@ class Model(dict, Entity, metaclass=NewModelClass):
         if self.__class__ is Model:
             raise TypeError("Cannot instance Model.")
 
-        self.session = None
-        self.state = None
+        self._session = None
+        self._state = None
         for name, field in self._fields.items():
             if field.default is not mago.UnSet:
                 self[name] = field.default
@@ -147,15 +147,10 @@ class Model(dict, Entity, metaclass=NewModelClass):
 
     def sync(self):
         """Update all the fields to the db"""
-        if not self.id:
-            raise ValueError("Cant sync an unsaved model.")
-
         self._check_attrs()
-        coll = self.collection()
         doc = self.copy()
-
-        # TODO: why??
-        return coll.update({'_id': self.id},
+        del doc["_id"]
+        return self.collection().update({'_id': self.id},
                            {"$set": doc})
 
     def delete(self):
