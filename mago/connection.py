@@ -39,6 +39,8 @@ class Connection(object):
 
         self._database = database
         self.connection = PyConnection(*args, **kwargs)
+        # recover from possible errors.
+        # tran.recovery()
         return self.connection
 
     def get_database(self, database=None):
@@ -54,15 +56,6 @@ class Connection(object):
     def get_collection(self, collection, database=None):
         """ Retrieve a collection from an existing connection. """
         return self.get_database(database=database)[collection]
-
-
-def connect(*args, **kwargs):
-    """
-    Initializes a connection and the database. It returns
-    the pymongo connection object so that end_request, etc.
-    can be called if necessary.
-    """
-    return Connection().connect(*args, **kwargs)
 
 
 class Session(object):
@@ -158,6 +151,7 @@ class Session(object):
 
     def close(self):
         """Delete everything related with session"""
+        # TODO: expunge models
         # clear everything
         self._bkp_pool.clear()
         self._pool.clear()
@@ -225,7 +219,12 @@ class Session(object):
         t.insert(self._states[Session.NEW])
         t.update(self._states[Session.DIRTY])
         t.remove(self._states[Session.DELETED])
-        t.commit()
+
+        try:
+            t.commit()
+        except IOError as ex:
+            self.rollback()
+            raise ex
 
         # correct states
         self._states[Session.CLEAN].update(self._states[Session.NEW])
@@ -233,12 +232,13 @@ class Session(object):
         [model.__setattr__('_state', Session.CLEAN) for model in
          self._states[Session.NEW].union(self._states[Session.DIRTY])]
 
-        self._states[Session.NEW].clear()
-        self._states[Session.DIRTY].clear()
-
-        # purge from session
+        # purge deleted from session
         for model in self._states[Session.DELETED]:
             self.expunge(model)
+
+        self._states[Session.NEW].clear()
+        self._states[Session.DIRTY].clear()
+        self._states[Session.DELETED].clear()
 
     def rollback(self):
         """Changes all the models to the state where the transaction started"""
@@ -262,3 +262,12 @@ class Session(object):
         [self._to_state(model, Session.CLEAN)
         for model in self.deleted]
         assert len(self._states[Session.DELETED]) == 0
+
+
+def connect(*args, **kwargs):
+    """
+    Initializes a connection and the database. It returns
+    the pymongo connection object so that end_request, etc.
+    can be called if necessary.
+    """
+    return Connection().connect(*args, **kwargs)

@@ -13,16 +13,18 @@ class notinstancemethod(object):
         return self.func.__get__(obj, objtype)
 
 
-def register_dirty(func):
-    def _register(self, name, *args, **kwargs):
+def track_changes(func):
+    def _track(self, name, *args, **kwargs):
         old = self.get(name, mago.UnSet)
         res = func(self, name, *args, **kwargs)
 
-        if old != self.get(name, mago.UnSet) and self._session \
-          and self._session.is_active:
+        if self._session and old != self.get(name, mago.UnSet) and  \
+          self._session.is_active:
             self._session._register_change(self, name, old)
         return res
-    return _register
+
+
+    return _track
 
 
 def singleton(cls):

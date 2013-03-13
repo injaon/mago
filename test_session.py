@@ -139,20 +139,6 @@ class MagoModelTest(unittest.TestCase):
         self.assertTrue(foo._session is None)
         self.assertTrue(foo._state is None)
 
-        # session.commit()
-        # self.assertTrue(foo._state is mago.Session.CLEAN)
-        # }}}
-
-    def test_commit(self):
-        foo = Foo()
-        session = mago.Session()
-        session.add(foo)
-        foo["hello"] = 'world!'
-        session.commit()
-
-        doc = foo.collection().find({"hello": "world!"})[0]
-        self.assertEqual(foo.copy(), doc)
-
 
 if __name__ == "__main__":
     unittest.main()

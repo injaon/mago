@@ -13,6 +13,7 @@ from bson.objectid import ObjectId
 
 
 def obj_to_dict(obj):
+    """Translate a non-model and non-native object to dict"""
     if hasattr(obj, "to_dict"):
         return obj.to_dict()
 
@@ -48,6 +49,7 @@ class NewModelClass(type):
         if new_model.__name__ == "Model":
             return new_model
         new_model._name = new_model.__name__.lower()
+        mago.types.models[new_model._name] = new_model
 
         # pre-populate fields
         new_model._fields = {}
@@ -132,6 +134,8 @@ class Model(dict, Entity, metaclass=NewModelClass):
 
         if not '_id' in self:
             dict.__setitem__(self,'_id', ObjectId())
+        if not '_trans' in self:
+            dict.__setitem__(self,'_trans', [])
 
     def save(self, *args, **kwargs):
         """Saves the model in the database"""
@@ -142,7 +146,6 @@ class Model(dict, Entity, metaclass=NewModelClass):
                 store[key] = obj_to_dict(val)
 
         self.collection().save(store, *args, **kwargs)
-        # dict.__setitem__(self, '_id', )
         return self
 
     def sync(self):
@@ -180,7 +183,7 @@ class Model(dict, Entity, metaclass=NewModelClass):
             field.check(value)
 
     # setters
-    @mago.decorators.register_dirty
+    @mago.decorators.track_changes
     def __setitem__(self, key, value):
         if value.__class__ is dict and value.get("__class__"):
             value = dict_to_obj(value)
@@ -190,15 +193,13 @@ class Model(dict, Entity, metaclass=NewModelClass):
         else:
             dict.__setitem__(self, key, value)
 
-    # getters
-    @mago.decorators.register_dirty
     def __getitem__(self, key):
         if key in self._fields.keys():
             return self._fields[key].__get__(self, key)
         return self.get(key, mago.UnSet)
 
     # dellers
-    @mago.decorators.register_dirty
+    @mago.decorators.track_changes
     def __delitem__(self, key):           # TODO: del model.id ??
         if key == "_id":
             raise KeyError("You cannot delete a model's `id`")
@@ -208,10 +209,8 @@ class Model(dict, Entity, metaclass=NewModelClass):
         return hash(self.id)
 
     def __eq__(self, other):
-        """
-        This method compares two objects names and id values.
-        If they match, they are "equal".
-        """
+        """Compares two objects names and id values. If they match,
+         they are "equal"."""
         if not isinstance(other, Model):
             return False
         this_id = self.id
