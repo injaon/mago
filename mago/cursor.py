@@ -14,7 +14,7 @@ class Cursor(PyCursor):
     instead of dicts. It can operate with session"""
 
     def __init__(self, modelcls,  *args, **kwargs):
-        self.session = None
+        self.session = kwargs.pop("session", None)
         self._order_entries = []
         self._modelcls = modelcls
         super().__init__(modelcls.collection(), *args, **kwargs)

@@ -1,22 +1,24 @@
 """ The basic field attributes. """
-
-import warnings
 from collections import Callable
 from bson.dbref import DBRef
 import mago
-# from mago import UnSet
+import mago.cursor
+
 
 class FieldError(Exception):
     pass
 
 
+class AbstractField(object):
+    pass
+
+
 class Field(object):
-    """
-    This class may eventually do type-checking, default values,
+    """This class may eventually do type-checking, default values,
     etc. but for right now it's for subclassing and glorified
     documentation.
-    It's a descriptor.
-    """
+    It's a descriptor."""
+
     @property
     def default(self):
         if isinstance(self._default, Callable):
@@ -121,3 +123,76 @@ class EnumField(Field):
         if val not in self.iterable:
             raise FieldError("Value {} is not acceptable.".format(val))
         return val
+
+
+# Relations
+class Relation(object):
+    def __init__(self, name, model):
+        if not issubclass(model, mago.Model):
+            raise FieldError("{} must be an instance of mago.Model"
+                             .format(model.__name__))
+        self._model = model
+        self._relation_name = "_rel_{}_{}".format(model.__name__, name)
+
+
+class OneToMany(object):
+    _relations = []
+
+    def __init__(self, name, model):
+        super().__init__(name, model)
+        if self._relation_name in OneToMany._relations:
+            raise ValueError("Relation name '{}' already extists".format(name))
+        OneToMany._relations.append(self._relation_name)
+
+    def __set__(self, obj, val):
+        raise Exception("Operation not supported.")
+
+    def __delete__(self, obj):
+        """Delete _only_ the key <_relation_name> of _model"""
+        if obj.session:
+            raise Exception("Operation not supported.")
+
+        self._model.collection().update(
+            {self._relation_name : obj.id}, {"$unset" :
+                {self._relation_name : obj.id}})
+
+    def __get__(self, obj, objtype):
+        return self._model.find({self._relation_name: obj.id},
+                                session=obj.session)
+
+
+class ManyToOne(object):
+    def __set__(self, obj, val):
+        if obj.session:
+            obj.session.merge(val)
+
+        obj[self._relation_name] = val.id
+
+    def __get__(self, obj, objtype):
+        # es un attr.
+        if obj.session:
+            try:
+                return obj.session._pool[obj[self._relation_name]]
+            except KeyError:
+                # TODO: find in the session
+                pass
+
+        return self._model.find({"_id"}, obj[self._relation_name])[0]
+
+    def __delete__(self, obj):
+        del obj[self._relation_name]
+
+
+class ManyToMany(object):
+    _relations = []
+
+    def __init__(self, name, modelcls):
+        if name in ManyToMany._relations:
+            raise ValueError("Relation name '{}' already extists".format(name))
+
+
+    def __set__(self, obj, val):
+        pass
+
+    def __get__(self, obj, objtype):
+        pass

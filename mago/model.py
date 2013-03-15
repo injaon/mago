@@ -55,7 +55,7 @@ class NewModelClass(type):
         new_model._fields = {}
         for attr in dir(new_model):
             value = getattr(new_model, attr)
-            if not isinstance(value, mago.field.Field):
+            if not isinstance(value, mago.field.AbstractField):
                 continue
 
             new_model._fields[attr] = value
