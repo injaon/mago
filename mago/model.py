@@ -3,7 +3,7 @@
 import mago
 import logging
 import pickle
-import mago.connection
+# import mago.connection
 import mago.cursor
 import mago.field
 import mago.decorators
@@ -48,7 +48,11 @@ class NewModelClass(type):
 
         if new_model.__name__ == "Model":
             return new_model
+
         new_model._name = new_model.__name__.lower()
+        new_model._collection = mago.connection.Connection()\
+          .get_collection(new_model._name)
+
         mago.types.models[new_model._name] = new_model
 
         # pre-populate fields
@@ -110,9 +114,6 @@ class Model(dict, Entity, metaclass=NewModelClass):
 
     @classmethod
     def collection(cls):
-        if not cls._collection:
-            cls._collection = mago.connection.Connection()\
-              .get_collection(cls._name)
         return cls._collection
 
     def __init__(self, **kwargs):
@@ -126,7 +127,7 @@ class Model(dict, Entity, metaclass=NewModelClass):
         self._session = None
         self._state = None
         for name, field in self._fields.items():
-            if field.default is not mago.UnSet:
+            if hasattr(field, "default") and field.default is not mago.UnSet:
                 self[name] = field.default
 
         for field, value in kwargs.items():
@@ -179,8 +180,9 @@ class Model(dict, Entity, metaclass=NewModelClass):
 
             # field = getattr(self.__class__, field_name, NotImplemented)
             field = self._fields[field_name]
-            value = self.get(field_name, mago.UnSet)
-            field.check(value)
+            if hasattr(field, "check"):
+                value = self.get(field_name, mago.UnSet)
+                field.check(value)
 
     # setters
     @mago.decorators.track_changes
@@ -194,16 +196,19 @@ class Model(dict, Entity, metaclass=NewModelClass):
             dict.__setitem__(self, key, value)
 
     def __getitem__(self, key):
-        if key in self._fields.keys():
-            return self._fields[key].__get__(self, key)
-        return self.get(key, mago.UnSet)
+        res = self.get(key, mago.UnSet)
+        return res if not res is mago.UnSet\
+          else self._fields[key].__get__(self, key)
 
-    # dellers
+    # del
     @mago.decorators.track_changes
     def __delitem__(self, key):           # TODO: del model.id ??
-        if key == "_id":
+        if key == "_id" or key == "id":
             raise KeyError("You cannot delete a model's `id`")
-        dict.__delitem__(self, key)
+        if key in self._fields.keys():
+            self._fields[key].__delete__(self)
+        else:
+            dict.__delitem__(self, key)
 
     def __hash__(self):
         return hash(self.id)

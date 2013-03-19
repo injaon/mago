@@ -5,9 +5,9 @@ import mago.types
 
 # from mago.transaction import Transaction
 from mago.field import Field, ReferenceField, ConstantField, EnumField, \
-      FieldError
+      FieldError, OneToMany, ManyToOne
 from mago.cursor import ASC, DESC
-from mago.connection import connect, Session
+from mago.connection import connect
 import mago.model
 
 

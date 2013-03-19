@@ -1,10 +1,13 @@
 #!/usr/bin/python3.2
 """ Various tests for the Model class """
 
-from mago import Field, ReferenceField, Model, connect, UnSet
+from mago import Field, ReferenceField, Model, connect, UnSet, OneToMany, ManyToOne
 from bson import ObjectId
 import unittest
+import mago
 
+
+_mongo_connection = connect("__test_model")
 
 class Bar(object):
     bar = "open bar"
@@ -31,23 +34,18 @@ class Foo(Model):
     #                  set_callback=lambda x, y: "bar")
     # reference = ReferenceField(Ref)
 
-
 class Small(Model):
     foo = Field()
 
 
 class MagoModelTest(unittest.TestCase):
 
-    def setUp(self):
-        super().setUp()
-        self._mongo_connection = connect("__test_model")
-        Foo.collection().remove({})
-
     def tearDown(self):
         super().tearDown()
-        self._mongo_connection.drop_database("__test_model")
-        self._mongo_connection.disconnect()
+        _mongo_connection.drop_database("__test_model")
+        _mongo_connection.disconnect()
 
+    @unittest.skip("pinto")
     def test_model_fields_init(self):
         """ Test that the model properly retrieves the fields """
         foo = Foo()
@@ -57,6 +55,7 @@ class MagoModelTest(unittest.TestCase):
         # self.assertTrue("callback" in foo._fields.keys())
         # self.assertTrue("reference" in foo._fields.keys())
 
+    @unittest.skip("pinto")
     def test_basic_operations(self):
         foo = Foo(foo="bar")
         self.assertEqual(type(foo.id), ObjectId)
@@ -87,6 +86,7 @@ class MagoModelTest(unittest.TestCase):
         self.assertRaises(IndexError, lambda:
                           foo.collection().find({"attr": "new"})[0])
 
+    @unittest.skip("pinto")
     def test_custom_obj_store(self):
         foo = Foo()    # a model
         foo["custom"] = "value"
@@ -111,6 +111,7 @@ class MagoModelTest(unittest.TestCase):
         self.assertEqual(NotAModel.class_attr, other_foo["obj"].__class__.class_attr)
         self.assertEqual(len(foo.copy()), len(other_foo.copy()))
 
+    @unittest.skip("pinto")
     def test_queries(self):
         Small.collection().remove({})
         Small(foo="foo").save()
@@ -122,6 +123,37 @@ class MagoModelTest(unittest.TestCase):
         cursor = Small.find({"foo":"bar"})
         self.assertEqual(cursor.count(), 1)
         self.assertEqual(type(cursor[0]), Small)
+
+    def test_relations(self):
+        # 1 to *
+        class User(Model):
+            name = Field()
+            addresses = OneToMany("Address", backref="user")
+
+        # * to 1
+        class Address(Model):
+            email = Field()
+            user = ManyToOne("User", backref="user")
+
+        self.assertEqual(User.addresses.field_name, "addresses")
+        self.assertEqual(User.addresses.model, Address)
+
+        self.assertEqual(Address.user.field_name, "user")
+        self.assertEqual(Address.user.model, User)
+
+        u = User()
+        u["name"] = "injaon"
+        # print("-----------", u["addresses"])
+
+        home = Address(email="injaon@gmail.com")
+        work = Address(email="dafuq@gmail.com")
+
+        u["addresses"] = [home, work]
+        print("1 to *", u["addresses"])
+        print("home", home.copy())
+
+        input("OK....")
+
 
 
     # def test_null_reference(self):

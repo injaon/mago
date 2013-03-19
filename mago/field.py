@@ -1,8 +1,9 @@
 """ The basic field attributes. """
 from collections import Callable
 from bson.dbref import DBRef
+from bson.objectid import ObjectId
 import mago
-import mago.cursor
+from mago.cursor import RelationCursor
 
 
 class FieldError(Exception):
@@ -125,74 +126,136 @@ class EnumField(Field):
         return val
 
 
-# Relations
-class Relation(object):
-    def __init__(self, name, model):
-        if not issubclass(model, mago.Model):
-            raise FieldError("{} must be an instance of mago.Model"
-                             .format(model.__name__))
+class RelationList(list):
+
+    def __init__(self, model, backref, obj, iter_):
+        # super(RelationList, self).__init__()
+        list.__init__(self)
+        # print(dir(super(RelationList, self)))
+
         self._model = model
-        self._relation_name = "_rel_{}_{}".format(model.__name__, name)
+        self._backref = backref
+        self._obj = obj
+        self.extend(iter_)
 
+    def clear(self):
+        """delete every reference from model and clear the list"""
+        # TODO: delete references
+        # super(RelationList, ).clear(self)
+        for model in self:
+            dict.__setitem__(model, self._backref, None)
+        del self[:]
 
-class OneToMany(object):
-    _relations = []
+    def extend(self, other):
+        for model in other:
+            dict.__setitem__(model, self._backref, self._obj)
+        # super(RelationList, ).extend(other)
+        list.extend(self, other)
 
-    def __init__(self, name, model):
-        super().__init__(name, model)
-        if self._relation_name in OneToMany._relations:
-            raise ValueError("Relation name '{}' already extists".format(name))
-        OneToMany._relations.append(self._relation_name)
+class OneToMany(AbstractField):
+
+    @property
+    def model(self):
+        """Return related model class"""
+        return mago.types.models[self._model]
+
+    def __init__(self, model, backref):
+        self.field_name = None
+        self._model = model.lower()
+        self._backref = backref
 
     def __set__(self, obj, val):
-        raise Exception("Operation not supported.")
-
-    def __delete__(self, obj):
-        """Delete _only_ the key <_relation_name> of _model"""
-        if obj.session:
-            raise Exception("Operation not supported.")
-
-        self._model.collection().update(
-            {self._relation_name : obj.id}, {"$unset" :
-                {self._relation_name : obj.id}})
+        """Done"""
+        current = getattr(obj, self.field_name)
+        current.clear()
+        current.extend(val)
 
     def __get__(self, obj, objtype):
-        return self._model.find({self._relation_name: obj.id},
-                                session=obj.session)
+        """Done"""
+        if obj is None:
+            return self
+        res = dict.get(obj, self.field_name, None)
+        if res is None:
+            res = RelationList(self.model, self._backref,
+                    obj, list(self.model.collection().find({
+                        self._backref : obj.id
+                    })))
+            dict.__setitem__(obj, self.field_name, res)
+
+        return res
+
+    def __delete__(self, obj):
+        """Done"""
+        current = getattr(obj, self.field_name)
+        current.clear()
 
 
-class ManyToOne(object):
+class ManyToOne(AbstractField):
+
+    @property
+    def model(self):
+        return mago.types.models[self._model]
+
+    def __init__(self, model, backref):
+        self.field_name = None
+        self._model = model.lower()
+        self._backref = backref
+
     def __set__(self, obj, val):
-        if obj.session:
-            obj.session.merge(val)
-
-        obj[self._relation_name] = val.id
+        """Done"""
+        old = dict.get(obj, self.field_name, None)
+        if old:
+            dict.pop(old, self._backref)
+        ref = val[self._backref]
+        dict.__setitem__(obj, self.field_name, val)
+        ref.append(obj)
 
     def __get__(self, obj, objtype):
-        # es un attr.
-        if obj.session:
-            try:
-                return obj.session._pool[obj[self._relation_name]]
-            except KeyError:
-                # TODO: find in the session
-                pass
+        """Done"""
+        if obj is None:
+            return self
 
-        return self._model.find({"_id"}, obj[self._relation_name])[0]
+        res = dict.get(obj, self.field_name, None)
+        if isinstance(res, ObjectId): # wake-up!
+            res = self.model.find_one({"_id": res})
+            dict.__setitem__(obj, self.field_name, res)
+
+        return res
+
 
     def __delete__(self, obj):
-        del obj[self._relation_name]
+        old = dict.get(obj, self.field_name, None)
+        if old:
+            dict.pop(old, self._backref)
+        dict.pop(obj, self.field_name)
 
 
 class ManyToMany(object):
     _relations = []
 
-    def __init__(self, name, modelcls):
+    def __init__(self, name, modelcls, bidirectional=True):
         if name in ManyToMany._relations:
             raise ValueError("Relation name '{}' already extists".format(name))
-
+        self._bi = bidirectional
+        self._coll = mago.connection.Connection()\
+          .get_collection(modelcls.__name__)
 
     def __set__(self, obj, val):
-        pass
+        raise NotImplemented("Not implemented yet")
 
     def __get__(self, obj, objtype):
-        pass
+        res = None
+        if self._bi:
+            res = RelationCursor({"$or" : [{ "from": obj.id}, {"to": obj.id}]})
+        else:
+            res = RelationCursor({"from": obj.id})
+        dict.__setitem__(obj, self.field_name, res)
+
+
+    def __delete__(self, obj):
+        raise NotImplemented("Not implemented yet")
+
+
+
+#
+# _id | from | to
